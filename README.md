@@ -1,8 +1,8 @@
 
 # Camera Lux
-cameralux is a Home Assistant sensor custom component that creates emulate a lux sensors that can be used to determine ambient light level from a camera images.  
+cameralux is a Home Assistant sensor custom component that creates emulate lux sensors that can be used to roughtly estimate ambient light level from camera images.  
 
-The cameralux sensor returns a lux unit of measure between 0 and 255 derived from the raw average image brightness of a Home Assistant [camera](https://www.home-assistant.io/components/camera/).
+The cameralux sensor returns a lux unit of measure between 0 and 255 which is the average image brightness of a Home Assistant [camera](https://www.home-assistant.io/components/camera/).
 
 ## Example configuration.yaml
 
