@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import glob
  
-import numpy as np
-from numpy.linalg import norm
-
 from datetime import timedelta
+import io
+import math
+
+from PIL import Image
+from PIL import ImageStat
 
 from homeassistant.components.sensor import SensorEntity, PLATFORM_SCHEMA
 from homeassistant.const import (
@@ -27,14 +29,6 @@ import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 import logging
 
-try:
-    # Verify that the OpenCV python package is pre-installed
-    import cv2
-
-    CV2_IMPORTED = True
-except ImportError:
-    CV2_IMPORTED = False
-
 _LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = timedelta(seconds=30)
@@ -48,28 +42,21 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
 
 
 """
-Emulated-lux sensor based on camera snapshot image 
+Create emulated-lux sensor from from camera entity
 
-- platform: cameralux
-  sensors:
-    Doorbell lux: camera.doorbell
-    Family lux: camera.family
-    Kitchen lux: camera.kitchen
+sensor:
+  - platform: jpeglux
+    entities:
+      - camera_one
+      - camera_two
+
 """
-
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
 
     _LOGGER.debug(
         "Camera Lux platform setup started"
     )
 
-    if not CV2_IMPORTED:
-        _LOGGER.error(
-            "No OpenCV library found! Install or compile for your system "
-            "following instructions here: http://opencv.org/releases.html"
-        )
-        return
-        
     sensors = [CameraLux(hass, name, entity_id) for name, entity_id in config[CONF_SENSORS].items()]
     async_add_entities(sensors, True)
 
@@ -122,69 +109,61 @@ class CameraLux(SensorEntity):
     async def async_update(self) -> None:
 
         _LOGGER.debug(
-            "Updating camera lux sensor %s for %s", self.name, self._camera_entity_id 
+            "Updating cameralux sensor %s for %s", self.name, self._camera_entity_id 
         )
 
         try:
-            camera = _get_camera_from_entity_id(self._hass, self._camera_entity_id)
+            camera = CameraLux.get_camera_from_entity_id(self._hass, self._camera_entity_id)
             if camera:
                 image_bytes = await camera.async_camera_image()    
                 if image_bytes:
+                    image = Image.open(io.BytesIO(image_bytes))
 
-                    image = np.asarray(bytearray(image_bytes), dtype="uint8")
-                    image = cv2.imdecode(image, cv2.IMREAD_COLOR)
-
-                    lux = _get_image_brightness(image)
+                    lux = CameraLux.get_image_lux(image)
                     self._state = round(lux, 2)
                     self._available = True
-        except:
-            _LOGGER.debug(
-                "Error updating camera lux sensor %s", self.name
+            else:
+                self._state = None
+                self._available = False      
+
+        except Exception as e:
+            _LOGGER.error(
+                "Error updating cameralux sensor %s: %s", self.name, e
             )
             self._state = None
             self._available = False
  
+    @staticmethod
+    def get_image_lux(image):
+        
+        # get average pixel level for each band in the image
+        stat = ImageStat.Stat(image)
+        r,g,b = stat.mean
 
-def _is_image_brighter_than(image, dim=10, thresh=0.5):
+        # calc perceived brightness value based on the degree each color 
+        # component (RGB) affect the human perception of brightness as suggested 
+        # by the National Television System Committee (NTSC) for converting color 
+        # feeds to black and white televisions set
 
-    # Resize image to 10x10
-    image = cv2.resize(image, (dim, dim))
+        return math.sqrt(0.299*(r**2) + 0.587*(g**2) + 0.114*(b**2))
 
-    # Convert color space to LAB format and extract L channel
-    L = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)[:, :, 0]
+    @staticmethod 
+    def get_camera_from_entity_id(hass: HomeAssistant, entity_id: str) -> Camera:
+        """Get camera component from entity_id."""
+        component = hass.data.get(CAMERA_DOMAIN)
 
-    # Normalize L channel by dividing all pixel values with maximum pixel value
-    L = L / np.max(L)
+        if component is None:
+            raise HomeAssistantError("Camera integration not set up")
 
-    # Return True if mean is greater than thresh else False
-    return np.mean(L) > thresh
+        camera = component.get_entity(entity_id)
 
-def _get_image_brightness(image):
-    if len(image.shape) == 3:
-        # Colored RGB or BGR (*Do Not* use HSV images with this function)
-        # create brightness with euclidean norm
-        return np.average(norm(image, axis=2)) / np.sqrt(3)
-    else:
-        # Grayscale
-        return np.average(image)
+        if camera is None:
+            raise HomeAssistantError(entity_id + " not found")
 
- 
-def _get_camera_from_entity_id(hass: HomeAssistant, entity_id: str) -> Camera:
-    """Get camera component from entity_id."""
-    component = hass.data.get(CAMERA_DOMAIN)
+        if not camera.is_on:
+            raise HomeAssistantError(entity_id + " is off")
 
-    if component is None:
-        raise HomeAssistantError("Camera integration not set up")
-
-    camera = component.get_entity(entity_id)
-
-    if camera is None:
-        raise HomeAssistantError("Camera not found")
-
-    if not camera.is_on:
-        raise HomeAssistantError("Camera is off")
-
-    return cast(Camera, camera)
+        return cast(Camera, camera)
 
 
- 
+    
