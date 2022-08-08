@@ -43,13 +43,6 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
 
 """
 Create emulated-lux sensor from from camera entity
-
-sensor:
-  - platform: jpeglux
-    entities:
-      - camera_one
-      - camera_two
-
 """
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
 
