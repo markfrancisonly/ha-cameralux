@@ -10,10 +10,9 @@ import math
 from PIL import Image
 from PIL import ImageStat
 
-from homeassistant.components.sensor import SensorEntity, PLATFORM_SCHEMA
+from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, PLATFORM_SCHEMA
 from homeassistant.const import (
-    CONF_SENSORS,
-    DEVICE_CLASS_ILLUMINANCE, 
+    CONF_SENSORS, 
     LIGHT_LUX,
 )
 from homeassistant.components.camera import Camera, DOMAIN as CAMERA_DOMAIN 
@@ -43,6 +42,13 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
 
 """
 Create emulated-lux sensor from from camera entity
+
+sensor:
+  - platform: jpeglux
+    entities:
+      - camera_one
+      - camera_two
+
 """
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
 
@@ -92,7 +98,7 @@ class CameraLux(SensorEntity):
     @property
     def device_class(self) -> str:
         """Return the illuminance."""
-        return DEVICE_CLASS_ILLUMINANCE
+        return SensorDeviceClass.ILLUMINANCE
 
     @property
     def available(self) -> bool:
@@ -157,6 +163,3 @@ class CameraLux(SensorEntity):
             raise HomeAssistantError(entity_id + " is off")
 
         return cast(Camera, camera)
-
-
-    
