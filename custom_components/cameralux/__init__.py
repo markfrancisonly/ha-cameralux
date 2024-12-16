@@ -1,1 +1,1 @@
-"""Camera Lux"""
+"""The Camera Lux integration."""

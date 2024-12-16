@@ -1,20 +1,47 @@
-
 # Camera Lux
-cameralux is a Home Assistant sensor custom component that emulates an ambient light level lux sensor from a [camera](https://www.home-assistant.io/components/camera/). The cameralux sensor has a state between 0 and 255 that represents the perceived brightness of the associated camera image.
 
-Configure via yaml using the config format `lux sensor friendly_name: camera.entity_id`
+**Camera Lux** is a custom Home Assistant integration that utilizes camera feeds to estimate ambient light levels (lux) in your environment. By analyzing images from your cameras, `cameralux` provides virtual lux readings that can be used to automate lighting, monitor lighting conditions, and enhance your smart home setup.
 
-## Example configuration.yaml
+## Features
+
+- **Real-Time Lux Monitoring:** Continuously estimate ambient light levels using your existing cameras.
+- **Configurable Update Intervals:** Customize how frequently each sensor updates its lux readings.
+- **Region of Interest (ROI):** Focus on specific areas within the camera's field of view for more accurate measurements.
+- **Calibration Factor:** Scale luminance to lux calculations to better align with real-world lighting conditions.
+- **Compatibility:** Works with any camera integrated into Home Assistant, supporting both camera entities and direct image URLs.
+
+## Installation
+
+1. **Using HACS (Recommended):**
+   - Open Home Assistant.
+   - Navigate to **HACS > Integrations**.
+   - Click on the **"+"** button.
+   - Search for **"Camera Lux Sensor"** and install it.
+
+2. **Manual Installation:**
+   - Download the `cameralux` repository from [GitHub](https://github.com/markfrancisonly/ha-cameralux).
+   - Place the `cameralux` folder inside your `custom_components` directory.
+   - Restart Home Assistant.
+
+## Configuration
+
+Add the following to your `configuration.yaml`:
 
 ```yaml
 sensor:
   - platform: cameralux
     sensors:
-      Doorbell lux: camera.doorbell
-      Family lux: camera.family
-      Kitchen lux: camera.kitchen
+      Office Wallpanel lux:
+        entity_id: camera.rtsp_office_wallpanel
+        calibration_factor: 1250
+        update_interval: 30  # Updates every 30 seconds
+        brightness_roi:
+          x: 100
+          y: 150
+          width: 200
+          height: 100
+      Kitchen Image lux:
+        image_url: https://your-domain.com/images/kitchen.jpg
+        calibration_factor: 500
+        update_interval: 45  # Updates every 45 seconds
 ```
-
-## Roadmap
-
-Missing is a configuration method to focus on a specific area of the camera image and calibrate the relationship between camera image brightness and lux value output. Ideally the mathematical relationship between lux and image brightness would auto-calibrate using the combined affect of time, season, and sun position to denote ambient lighting markers in camera image brightness. 
