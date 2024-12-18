@@ -10,20 +10,21 @@
 - **Calibration Factor:** Scale luminance to lux calculations to better align with real-world lighting conditions.
 - **Compatibility:** Works with any camera integrated into Home Assistant, supporting both camera entities and direct image URLs.
 
-## Installation
+## Configuration Parameters
 
-1. **Using HACS (Recommended):**
-   - Open Home Assistant.
-   - Navigate to **HACS > Integrations**.
-   - Click on the **"+"** button.
-   - Search for **"Camera Lux Sensor"** and install it.
+- **`entity_id`**: The camera entity from which to fetch images.
+- **`image_url`** *(optional)*: Direct HTTP URL pointing to an image file (e.g., JPEG, PNG).
+- **`update_interval`** *(optional)*: Seconds between updates. Default is 30 seconds.
+- **`brightness_roi`** *(optional)*: Defines a rectangular region within the image for focused brightness assessment.
+  - **`x`**: The x-coordinate of the top-left corner of the ROI.
+  - **`y`**: The y-coordinate of the top-left corner of the ROI.
+  - **`width`**: The width of the ROI.
+  - **`height`**: The height of the ROI.
+- **`calibration_factor`** *(optional)*: A float value to calibrate the percieved luminance to lux. Defaults to 2000 if not specified.
 
-2. **Manual Installation:**
-   - Download the `cameralux` repository from [GitHub](https://github.com/markfrancisonly/ha-cameralux).
-   - Place the `cameralux` folder inside your `custom_components` directory.
-   - Restart Home Assistant.
+**Note:** Each sensor must have either `entity_id` or `image_url` configured, but not both.
 
-## Configuration
+## Example Configuration
 
 Add the following to your `configuration.yaml`:
 
@@ -45,3 +46,16 @@ sensor:
         calibration_factor: 500
         update_interval: 45  # Updates every 45 seconds
 ```
+
+## Installation
+
+1. **Using HACS (Recommended):**
+   - Open Home Assistant.
+   - Navigate to **HACS > Integrations**.
+   - Click on the **"+"** button.
+   - Search for **"Camera Lux Sensor"** and install it.
+
+2. **Manual Installation:**
+   - Download the `cameralux` repository from [GitHub](https://github.com/markfrancisonly/ha-cameralux).
+   - Place the `cameralux` folder inside your `custom_components` directory.
+   - Restart Home Assistant.
