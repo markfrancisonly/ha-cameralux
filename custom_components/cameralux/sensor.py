@@ -297,13 +297,15 @@ class CameraLuxSensor(SensorEntity):
                 image = await self.async_fetch_image_from_url(self._image_url)
 
             if image:
-                # Calculate lux using average pixel luminance
+                
                 cropped_image = self.crop_image(image, self._roi)
                 resized_image = self.resize_image(cropped_image, MAX_PIXELS)
 
                 self._avg_luminance, self._perceived_luminance = (
                     self.calculate_image_luminance(resized_image)
                 )
+
+                # Calculate lux using perceived luminance
                 self._lux = (
                     self._perceived_luminance
                     * self._luminance_to_lux_calibration_factor
@@ -348,9 +350,7 @@ class CameraLuxSensor(SensorEntity):
             _LOGGER.warning("Camera %s is off", entity_id)
             return None
 
-        if not camera.available or (
-            camera.state is not None and camera.state in ["unknown", "unavailable"]
-        ):
+        if not camera.available or camera.state in ["unknown", "unavailable"]:
             _LOGGER.warning("Camera %s is not available", entity_id)
             return None
 
