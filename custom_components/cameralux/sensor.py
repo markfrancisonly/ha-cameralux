@@ -344,6 +344,16 @@ class CameraLuxSensor(SensorEntity):
             _LOGGER.error("Camera entity %s not found", entity_id)
             return None
 
+        if not camera.is_on:
+            _LOGGER.warning("Camera %s is off", entity_id)
+            return None
+
+        if not camera.available or (
+            camera.state is not None and camera.state in ["unknown", "unavailable"]
+        ):
+            _LOGGER.warning("Camera %s is not available", entity_id)
+            return None
+
         image_bytes = await camera.async_camera_image()
         if image_bytes:
             image = Image.open(io.BytesIO(image_bytes))
@@ -369,7 +379,7 @@ class CameraLuxSensor(SensorEntity):
                     image.load()
                     return image
                 else:
-                    _LOGGER.error(
+                    _LOGGER.warning(
                         "Failed to fetch %s image from URL '%s': HTTP %d",
                         self.name,
                         url,
@@ -378,7 +388,7 @@ class CameraLuxSensor(SensorEntity):
                     return None
 
         except aiohttp.ClientError as e:
-            _LOGGER.error(
+            _LOGGER.warning(
                 "HTTP error while fetching %s image from URL '%s': %s",
                 self.name,
                 url,
@@ -387,7 +397,7 @@ class CameraLuxSensor(SensorEntity):
             return None
 
         except asyncio.TimeoutError:
-            _LOGGER.error(
+            _LOGGER.warning(
                 "Timeout while fetching %s image from URL '%s'", self.name, url
             )
             return None

@@ -1,7 +1,7 @@
 {
   "domain": "cameralux",
   "name": "Camera Lux",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "documentation": "https://github.com/markfrancisonly/ha-cameralux",
   "issue_tracker": "https://github.com/markfrancisonly/ha-cameralux/issues",
   "requirements": [
