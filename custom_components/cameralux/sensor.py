@@ -20,10 +20,19 @@ from homeassistant.components.sensor import (
     SensorStateClass,
     PLATFORM_SCHEMA,
 )
-from homeassistant.const import LIGHT_LUX, EVENT_HOMEASSISTANT_STARTED
-from homeassistant.core import CoreState, CALLBACK_TYPE, HomeAssistant
+from homeassistant.components.camera.const import (
+    DATA_COMPONENT as CAMERA_DATA_COMPONENT,
+)
+from homeassistant.components.camera import Camera
+
+
+from homeassistant.const import (
+    LIGHT_LUX,
+    EVENT_HOMEASSISTANT_STARTED,
+    ATTR_ENTITY_ID,
+)
+from homeassistant.core import CoreState, CALLBACK_TYPE, HomeAssistant, ServiceCall
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.entity_component import EntityComponent
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_time_interval
@@ -31,6 +40,8 @@ import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 
 _LOGGER = logging.getLogger(__name__)
+SERVICE_FORCE_UPDATE = "force_update"
+DOMAIN = "cameralux"
 
 # Configuration Constants
 CONF_SENSORS = "sensors"
@@ -52,6 +63,12 @@ DEFAULT_UPDATE_INTERVAL = 30  # seconds
 
 
 # Configuration Schemas
+SERVICE_FORCE_UPDATE_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_ENTITY_ID): cv.entity_ids,
+    }
+)
+
 BRIGHTNESS_ROI_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_X): cv.positive_int,
@@ -114,13 +131,51 @@ async def async_setup_platform(
 
         except Exception as e:
             _LOGGER.error(
-                "Failed to initialize CameraLux sensor '%s': %s",
+                "Failed to initialize new CameraLux sensor '%s': %s",
                 name,
                 e,
             )
             continue
 
     async_add_entities(sensors)
+    _LOGGER.info("Registered %d CameraLux sensors.", len(sensors))
+
+    if DOMAIN in hass.data:
+        return
+
+    async def force_update_service(
+        call: ServiceCall,
+    ) -> None:
+        """Handle the force_update service call."""
+
+        sensors = hass.data[DOMAIN]["sensors"]
+        entity_ids = call.data.get(ATTR_ENTITY_ID)
+
+        if isinstance(entity_ids, str):
+            entity_ids = [entity_ids]
+
+        if entity_ids:
+            update_tasks = [
+                sensor.async_update()
+                for sensor in sensors
+                if sensor.entity_id in entity_ids
+            ]
+        else:
+            update_tasks = [sensor.async_update() for sensor in sensors]
+
+        if update_tasks:
+            await asyncio.gather(*update_tasks)
+            _LOGGER.info("Force update triggered for %d sensor(s).", len(update_tasks))
+        else:
+            _LOGGER.warning("No matching sensors found to update.")
+
+    hass.data[DOMAIN] = {"sensors": sensors}
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_FORCE_UPDATE,
+        force_update_service,
+        schema=SERVICE_FORCE_UPDATE_SCHEMA,
+    )
 
 
 class CameraLuxSensor(SensorEntity):
@@ -287,17 +342,14 @@ class CameraLuxSensor(SensorEntity):
             self._is_updating = True
 
             if self._camera_entity_id:
-                # Retrieve the camera entity using the helper method
                 image = await self.async_get_image_from_camera_entity_id(
                     self._camera_entity_id
                 )
 
             elif self._image_url:
-                # Fetch the image from the provided HTTP URL
                 image = await self.async_fetch_image_from_url(self._image_url)
 
             if image:
-                
                 cropped_image = self.crop_image(image, self._roi)
                 resized_image = self.resize_image(cropped_image, MAX_PIXELS)
 
@@ -336,9 +388,10 @@ class CameraLuxSensor(SensorEntity):
     async def async_get_image_from_camera_entity_id(
         self, entity_id: str
     ) -> Image.Image | None:
-        """Retrieve the Camera entity from the entity ID."""
+        """Retrieve Camera image from entity ID."""
 
-        if (component := self.hass.data.get("camera")) is None:
+        # also considered homeassistant.components.camera.helper.get_camera_from_entity_id
+        if (component := self.hass.data.get(CAMERA_DATA_COMPONENT)) is None:
             _LOGGER.critical("Camera integration not set up")
             return None
 
@@ -350,7 +403,7 @@ class CameraLuxSensor(SensorEntity):
             _LOGGER.warning("Camera %s is off", entity_id)
             return None
 
-        if not camera.available or camera.state in ["unknown", "unavailable"]:
+        if not camera.available:
             _LOGGER.warning("Camera %s is not available", entity_id)
             return None
 

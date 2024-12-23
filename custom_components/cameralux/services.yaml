@@ -1,0 +1,11 @@
+force_update:
+  name: "Force Update Sensors"
+  description: "Trigger an immediate update for one or more CameraLux sensors."
+  fields:
+    entity_id:
+      name: "Entity ID"
+      description: "List of entity IDs of the CameraLux sensors to update. If omitted, all CameraLux sensors will be updated."
+      example:
+        - sensor.cameralux_living_room
+        - sensor.cameralux_kitchen
+      required: false
