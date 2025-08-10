@@ -2,6 +2,7 @@ name: "HACS Validate"
 on:
   push:
   pull_request:
+  workflow_dispatch:
 jobs:
   hacs:
     name: "HACS validation"
