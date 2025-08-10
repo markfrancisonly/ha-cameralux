@@ -1,80 +1,122 @@
-"""Platform for sensor integration."""
+# custom_components/cameralux/sensor.py
+"""CameraLux sensor entity for Home Assistant."""
 
 from __future__ import annotations
 
-import io
-import math
-import logging
 import asyncio
-from datetime import timedelta, datetime
-from typing import Optional, Dict
+import hashlib
+import io
+import logging
+import math
+from datetime import datetime, timedelta
+from typing import Any, Dict, Optional
 
 import aiohttp
-import numpy as np
-from PIL import Image
-import hashlib
-
-from homeassistant.components.sensor import (
-    SensorEntity,
-    SensorDeviceClass,
-    SensorStateClass,
-    PLATFORM_SCHEMA,
-)
-from homeassistant.components.camera.const import (
-    DATA_COMPONENT as CAMERA_DATA_COMPONENT,
-)
-from homeassistant.components.camera import Camera
-
-
-from homeassistant.const import (
-    LIGHT_LUX,
-    EVENT_HOMEASSISTANT_STARTED,
-    ATTR_ENTITY_ID,
-)
-from homeassistant.core import CoreState, CALLBACK_TYPE, HomeAssistant, ServiceCall
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.event import async_track_time_interval
 import homeassistant.helpers.config_validation as cv
+import numpy as np
 import voluptuous as vol
+from homeassistant.components.sensor import (
+    PLATFORM_SCHEMA,
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.core import CALLBACK_TYPE, CoreState, HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
+from PIL import Image, UnidentifiedImageError
+
+# Unit compatibility shim (older HA uses LIGHT_LUX constant)
+try:
+    from homeassistant.const import UnitOfIlluminance  # HA 2023.9+
+
+    UNIT_LUX = UnitOfIlluminance.LUX
+except Exception:  # noqa: BLE001
+    from homeassistant.const import LIGHT_LUX as UNIT_LUX
+
+from .const import (
+    CONF_BRIGHTNESS_ROI,
+    CONF_CALIBRATION_FACTOR,
+    CONF_ENTITY_ID,
+    CONF_HEIGHT,
+    CONF_IMAGE_URL,
+    CONF_ROI_ENABLED,
+    CONF_SENSORS,
+    CONF_SOURCE,
+    CONF_UPDATE_INTERVAL,
+    CONF_WIDTH,
+    CONF_X,
+    CONF_Y,
+    DEFAULT_CALIBRATION_FACTOR,
+    DEFAULT_UPDATE_INTERVAL,
+    DOMAIN,
+    MAX_PIXELS,
+    SOURCE_CAMERA,
+    SOURCE_URL,
+    SUGGESTED_DISPLAY_PRECISION,
+)
 
 _LOGGER = logging.getLogger(__name__)
-SERVICE_FORCE_UPDATE = "force_update"
-DOMAIN = "cameralux"
 
-# Configuration Constants
-CONF_SENSORS = "sensors"
-CONF_ENTITY_ID = "entity_id"
-CONF_IMAGE_URL = "image_url"
-CONF_BRIGHTNESS_ROI = "brightness_roi"
-CONF_X = "x"
-CONF_Y = "y"
-CONF_WIDTH = "width"
-CONF_HEIGHT = "height"
-CONF_CALIBRATION_FACTOR = "calibration_factor"
-CONF_UPDATE_INTERVAL = "update_interval"
-
-# Default Values
-MAX_PIXELS = 250000
-SUGGESTED_DISPLAY_PRECISION = 3
-DEFAULT_CALIBRATION_FACTOR = 2000
-DEFAULT_UPDATE_INTERVAL = 30  # seconds
+# Resampling fallback (older Pillow)
+try:
+    RESAMPLE = Image.Resampling.LANCZOS  # Pillow >= 9.1
+except Exception:  # noqa: BLE001
+    RESAMPLE = Image.LANCZOS
 
 
-# Configuration Schemas
-SERVICE_FORCE_UPDATE_SCHEMA = vol.Schema(
-    {
-        vol.Optional(ATTR_ENTITY_ID): cv.entity_ids,
-    }
-)
+def get_bounded_int(
+    val,
+    default: int = 0,
+    min_value: int | None = None,
+    max_value: int | None = None,
+) -> int:
+    """Coerce a value to int, falling back to default and clamping to [min_value, max_value] if provided."""
+    try:
+        iv = int(val)
+    except (TypeError, ValueError):
+        iv = default
+    if min_value is not None and iv < min_value:
+        iv = min_value
+    if max_value is not None and iv > max_value:
+        iv = max_value
+    return iv
 
+
+def coerce_float(val, default: float) -> float:
+    """Coerce a value to float, returning default on failure."""
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return default
+
+
+def precompute_inverse_gamma_8bit_lut() -> np.ndarray:
+    """Generate a 256-entry inverse gamma LUT to linearize sRGB 8-bit values."""
+    lut = np.zeros(256, dtype=np.float32)
+    for i in range(256):
+        normalized = i / 255.0
+        if normalized <= 0.04045:
+            lut[i] = normalized / 12.92
+        else:
+            lut[i] = ((normalized + 0.055) / 1.055) ** 2.4
+    return lut
+
+
+INVERSE_GAMMA_LUT = precompute_inverse_gamma_8bit_lut()
+
+# YAML schemas (kept for import support)
 BRIGHTNESS_ROI_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_X): cv.positive_int,
-        vol.Required(CONF_Y): cv.positive_int,
-        vol.Required(CONF_WIDTH): cv.positive_int,
-        vol.Required(CONF_HEIGHT): cv.positive_int,
+        vol.Optional(CONF_ROI_ENABLED, default=False): cv.boolean,
+        vol.Optional(CONF_X): vol.Coerce(int),
+        vol.Optional(CONF_Y): vol.Coerce(int),
+        vol.Optional(CONF_WIDTH): vol.Coerce(int),
+        vol.Optional(CONF_HEIGHT): vol.Coerce(int),
     }
 )
 
@@ -98,438 +140,407 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
 )
 
 
-def precompute_inverse_gamma_8bit_lut() -> np.ndarray:
-    """Generate an inverse gamma LUT to linearize sRGB values."""
-    lut = np.zeros(256, dtype=np.float32)
-    for i in range(256):
-        normalized = i / 255.0
-        if normalized <= 0.04045:
-            lut[i] = normalized / 12.92
-        else:
-            lut[i] = ((normalized + 0.055) / 1.055) ** 2.4
-    return lut
-
-
-INVERSE_GAMMA_LUT = precompute_inverse_gamma_8bit_lut()
-
-
 async def async_setup_platform(
     hass: HomeAssistant,
     config: ConfigType,
     async_add_entities: AddEntitiesCallback,
     discovery_info: Optional[DiscoveryInfoType] = None,
 ):
-    """Set up the Camera Lux sensor platform."""
-    _LOGGER.debug("Camera Lux platform setup started")
-
-    sensors = []
+    """Import YAML-defined sensors into config entries (one-time conversion)."""
+    _LOGGER.debug("CameraLux YAML import starting")
     for name, sensor_config in config[CONF_SENSORS].items():
-
-        try:
-            sensor = CameraLuxSensor(hass, name, sensor_config)
-            sensors.append(sensor)
-
-        except Exception as e:
-            _LOGGER.error(
-                "Failed to initialize new CameraLux sensor '%s': %s",
-                name,
-                e,
+        data = {
+            "name": name,
+            CONF_ENTITY_ID: sensor_config.get(CONF_ENTITY_ID),
+            CONF_IMAGE_URL: sensor_config.get(CONF_IMAGE_URL),
+            CONF_BRIGHTNESS_ROI: sensor_config.get(CONF_BRIGHTNESS_ROI, {}),
+            CONF_CALIBRATION_FACTOR: sensor_config.get(
+                CONF_CALIBRATION_FACTOR, DEFAULT_CALIBRATION_FACTOR
+            ),
+            CONF_UPDATE_INTERVAL: sensor_config.get(
+                CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL
+            ),
+        }
+        hass.async_create_task(
+            hass.config_entries.flow.async_init(
+                DOMAIN,
+                context={"source": "import"},
+                data=data,
             )
-            continue
+        )
+    return
 
-    async_add_entities(sensors)
-    _LOGGER.info("Registered %d CameraLux sensors.", len(sensors))
 
-    if DOMAIN in hass.data:
-        return
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+):
+    """Create entities from a UI config entry and its options."""
+    data = {**entry.data, **entry.options}
 
-    async def force_update_service(
-        call: ServiceCall,
-    ) -> None:
-        """Handle the force_update service call."""
+    source = data.get(CONF_SOURCE)
+    if source not in (SOURCE_CAMERA, SOURCE_URL):
+        source = SOURCE_CAMERA if data.get(CONF_ENTITY_ID) else SOURCE_URL
 
-        sensors = hass.data[DOMAIN]["sensors"]
-        entity_ids = call.data.get(ATTR_ENTITY_ID)
+    camera_entity = data.get(CONF_ENTITY_ID) if source == SOURCE_CAMERA else None
+    image_url = data.get(CONF_IMAGE_URL) if source == SOURCE_URL else None
 
-        if isinstance(entity_ids, str):
-            entity_ids = [entity_ids]
+    if camera_entity and image_url:
+        _LOGGER.warning(
+            "Both camera entity and image URL provided; preferring camera entity '%s'.",
+            camera_entity,
+        )
+        image_url = None
 
-        if entity_ids:
-            update_tasks = [
-                sensor.async_update()
-                for sensor in sensors
-                if sensor.entity_id in entity_ids
-            ]
-        else:
-            update_tasks = [sensor.async_update() for sensor in sensors]
+    cfg = {
+        CONF_ENTITY_ID: camera_entity,
+        CONF_IMAGE_URL: image_url,
+        CONF_BRIGHTNESS_ROI: data.get(CONF_BRIGHTNESS_ROI, {}),
+        CONF_CALIBRATION_FACTOR: data.get(
+            CONF_CALIBRATION_FACTOR, DEFAULT_CALIBRATION_FACTOR
+        ),
+        CONF_UPDATE_INTERVAL: data.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
+    }
 
-        if update_tasks:
-            await asyncio.gather(*update_tasks)
-            _LOGGER.info("Force update triggered for %d sensor(s).", len(update_tasks))
-        else:
-            _LOGGER.warning("No matching sensors found to update.")
-
-    hass.data[DOMAIN] = {"sensors": sensors}
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_FORCE_UPDATE,
-        force_update_service,
-        schema=SERVICE_FORCE_UPDATE_SCHEMA,
+    # Use entry.entry_id as the stable unique_id so Options edits never change the entity id.
+    async_add_entities(
+        [
+            CameraLuxSensor(
+                hass,
+                entry.data.get("name") or "Camera Lux",
+                cfg,
+                stable_unique_id=entry.entry_id,
+            )
+        ]
     )
 
 
 class CameraLuxSensor(SensorEntity):
-    """Representation of a Camera-based Lux Sensor."""
+    """Camera-based illuminance sensor that samples an image from a camera entity or an image URL."""
+
+    _attr_should_poll = False
+    _attr_device_class = SensorDeviceClass.ILLUMINANCE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UNIT_LUX
+    _attr_suggested_display_precision = SUGGESTED_DISPLAY_PRECISION
 
     def __init__(
         self,
         hass: HomeAssistant,
         name: str,
         config: dict,
+        stable_unique_id: str | None = None,
     ):
+        """Initialize the sensor from a validated config dict."""
         super().__init__()
-
-        """Initialize the sensor."""
         self.hass = hass
-        self._name = name
+        self._attr_name = name
 
-        self._lux: float | None = None
-        self._avg_luminance: float | None = None
-        self._perceived_luminance: float | None = None
+        self.lux: float | None = None
+        self.avg_luminance: float | None = None
+        self.perceived_luminance: float | None = None
 
-        self._remove_interval_update: CALLBACK_TYPE | None = None
-        self._is_updating = False
+        self.remove_interval_update: CALLBACK_TYPE | None = None
+        self.is_updating = False
 
-        # Extract configuration parameters with defaults
-        self._camera_entity_id = config.get(CONF_ENTITY_ID)
-        self._image_url = config.get(CONF_IMAGE_URL)
-        self._roi = config.get(CONF_BRIGHTNESS_ROI)
-        self._luminance_to_lux_calibration_factor: float = config.get(
-            CONF_CALIBRATION_FACTOR, DEFAULT_CALIBRATION_FACTOR
-        )
-        self._update_interval = config.get(
-            CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL
+        self.camera_entity_id = config.get(CONF_ENTITY_ID) or None
+        self.image_url = (
+            (config.get(CONF_IMAGE_URL) or None) if not self.camera_entity_id else None
         )
 
-        if not self._camera_entity_id and not self._image_url:
-            raise ValueError(
-                f"CameraLux sensor '{self.name}' must have either 'entity_id' or 'image_url' configured."
-            )
+        roi_cfg = config.get(CONF_BRIGHTNESS_ROI) or {}
+        self.roi_enabled: bool = bool(roi_cfg.get(CONF_ROI_ENABLED, False))
+        self.roi = {
+            CONF_X: get_bounded_int(roi_cfg.get(CONF_X), 0, 0, None),
+            CONF_Y: get_bounded_int(roi_cfg.get(CONF_Y), 0, 0, None),
+            CONF_WIDTH: get_bounded_int(roi_cfg.get(CONF_WIDTH), 0, 0, None),
+            CONF_HEIGHT: get_bounded_int(roi_cfg.get(CONF_HEIGHT), 0, 0, None),
+        }
 
-        self._unique_id = self.create_unique_id()
+        self.luminance_to_lux_calibration_factor = max(
+            0.0,
+            coerce_float(
+                config.get(CONF_CALIBRATION_FACTOR, DEFAULT_CALIBRATION_FACTOR),
+                DEFAULT_CALIBRATION_FACTOR,
+            ),
+        )
+        self.update_interval = get_bounded_int(
+            config.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
+            DEFAULT_UPDATE_INTERVAL,
+            5,
+            3600,
+        )
 
-        if self._camera_entity_id:
-            _LOGGER.info(
-                "CameraLux sensor %s initialized with calibration factor %.3f using camera entity %s",
+        if not self.camera_entity_id and not self.image_url:
+            _LOGGER.error(
+                "CameraLux '%s' has neither camera entity nor image URL configured; sensor will stay unavailable.",
                 name,
-                self._luminance_to_lux_calibration_factor,
-                self._camera_entity_id,
             )
-        if self._image_url:
+
+        self._attr_unique_id = stable_unique_id or self.build_unique_id(
+            camera_entity_id=self.camera_entity_id,
+            image_url=self.image_url,
+            sensor_name=name,
+        )
+
+        if self.camera_entity_id:
             _LOGGER.info(
-                "CameraLux sensor %s initialized with calibration factor %.3f using image URL %s",
+                "CameraLux '%s': calibration %.3f (camera %s, ROI %s)",
                 name,
-                self._luminance_to_lux_calibration_factor,
-                self._image_url,
+                self.luminance_to_lux_calibration_factor,
+                self.camera_entity_id,
+                "enabled" if self.roi_enabled else "disabled",
+            )
+        elif self.image_url:
+            _LOGGER.info(
+                "CameraLux '%s': calibration %.3f (image URL, ROI %s)",
+                name,
+                self.luminance_to_lux_calibration_factor,
+                "enabled" if self.roi_enabled else "disabled",
             )
 
-    def create_unique_id(self) -> str | None:
-        """Return a unique ID for the sensor."""
-        if self._camera_entity_id:
-            return f"cameralux_{self._camera_entity_id.replace('.', '_')}"
-
-        if self._image_url:
-            url_hash = hashlib.md5(self._image_url.encode()).hexdigest()
-            return f"cameralux_url_{url_hash}"
+    @staticmethod
+    def build_unique_id(
+        camera_entity_id: str | None, image_url: str | None, sensor_name: str
+    ) -> str | None:
+        """Build a unique_id from the configured source and a short hash of the sensor name."""
+        name_tag = hashlib.md5(sensor_name.encode()).hexdigest()[:8]
+        if camera_entity_id:
+            base = f"cameralux_{camera_entity_id.replace('.', '_')}"
+            return f"{base}_{name_tag}"
+        if image_url:
+            url_hash = hashlib.md5(image_url.encode()).hexdigest()
+            base = f"cameralux_url_{url_hash}"
+            return f"{base}_{name_tag}"
         return None
 
     @property
-    def should_poll(self) -> bool:
-        """No polling needed. Updates handled by interval."""
-        return False
-
-    @property
-    def name(self) -> str:
-        """Return the name of the sensor."""
-        return self._name
-
-    @property
-    def unique_id(self) -> str:
-        """Return the unique ID of the sensor."""
-        return self._unique_id
-
-    @property
-    def native_unit_of_measurement(self) -> str:
-        """Return the unit of measurement."""
-        return LIGHT_LUX
-
-    @property
-    def state_class(self) -> str:
-        """Return the state class."""
-        return SensorStateClass.MEASUREMENT
-
-    @property
-    def device_class(self) -> str:
-        """Return the device class."""
-        return SensorDeviceClass.ILLUMINANCE
+    def available(self) -> bool:
+        """Return True when a lux value has been computed."""
+        return self.lux is not None
 
     @property
     def native_value(self) -> float | None:
-        """Return the native value."""
-        return self._lux
+        """Return the current illuminance in lux."""
+        return self.lux
 
     @property
-    def extra_state_attributes(self) -> dict:
-        """Return additional attributes of the sensor."""
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return extra attributes for debugging and calibration."""
         if self.available:
             return {
-                "calibration_factor": self._luminance_to_lux_calibration_factor,
-                "avg_luminance": f"{self._avg_luminance:.6f}",
-                "perceived_luminance": f"{self._perceived_luminance:.6f}",
+                "calibration_factor": self.luminance_to_lux_calibration_factor,
+                "avg_luminance": self.avg_luminance,
+                "perceived_luminance": self.perceived_luminance,
+                "roi_enabled": self.roi_enabled,
+                "roi": self.roi,
             }
-        else:
-            return {}
-
-    @property
-    def suggested_display_precision(self) -> int:
-        """Return the suggested display precision."""
-        return SUGGESTED_DISPLAY_PRECISION
-
-    @property
-    def available(self) -> bool:
-        """Return True if entity is available."""
-        return self._lux is not None
+        return {}
 
     async def async_added_to_hass(self):
-        """Register callbacks when entity is added to hass."""
+        """Start periodic updates when the entity is added to Home Assistant."""
 
         async def start_polling(_=None):
             self.hass.async_create_task(self.async_update())
-
-            # Schedule periodic updates based on the update_interval
-            self._remove_interval_update = async_track_time_interval(
-                self.hass, self.async_update, timedelta(seconds=self._update_interval)
+            self.remove_interval_update = async_track_time_interval(
+                self.hass, self.async_update, timedelta(seconds=self.update_interval)
             )
 
         if self.hass.state is not CoreState.running:
-            self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, start_polling)
+            self.async_on_remove(
+                self.hass.bus.async_listen_once(
+                    EVENT_HOMEASSISTANT_STARTED, start_polling
+                )
+            )
         else:
             await start_polling()
 
     async def async_will_remove_from_hass(self):
-        """Cleanup when entity is removed from hass."""
-        if self._remove_interval_update:
-            self._remove_interval_update()
+        """Stop periodic updates when the entity is removed."""
+        if self.remove_interval_update:
+            self.remove_interval_update()
+            self.remove_interval_update = None
 
     async def async_update(self, _: datetime | None = None) -> None:
-        """Fetch new state data for the sensor."""
-
+        """Fetch an image, compute luminance, and update the lux value."""
         if self.hass.state is not CoreState.running:
             _LOGGER.debug(
-                "Skipping CameraLux sensor '%s' update - Home Assistant not fully started",
-                self.name,
+                "Skipping '%s' update - Home Assistant not running", self._attr_name
             )
             return
-
-        if self._is_updating:
-            _LOGGER.debug(
-                "CameraLux sensor '%s' update already in progress. Skipping this update.",
-                self.name,
-            )
+        if self.is_updating:
+            _LOGGER.debug("'%s' update already in progress; skipping.", self._attr_name)
             return
 
         try:
-            self._is_updating = True
+            self.is_updating = True
+            image: Image.Image | None = None
 
-            if self._camera_entity_id:
+            if self.camera_entity_id:
                 image = await self.async_get_image_from_camera_entity_id(
-                    self._camera_entity_id
+                    self.camera_entity_id
                 )
-
-            elif self._image_url:
-                image = await self.async_fetch_image_from_url(self._image_url)
+            elif self.image_url:
+                image = await self.async_fetch_image_from_url(self.image_url)
+            else:
+                self.avg_luminance = None
+                self.perceived_luminance = None
+                self.lux = None
+                return
 
             if image:
-                cropped_image = self.crop_image(image, self._roi)
+                roi_for_calc = self.roi if self.roi_enabled else None
+                cropped_image = self.crop_image(image, roi_for_calc)
                 resized_image = self.resize_image(cropped_image, MAX_PIXELS)
 
-                self._avg_luminance, self._perceived_luminance = (
+                self.avg_luminance, self.perceived_luminance = (
                     self.calculate_image_luminance(resized_image)
                 )
-
-                # Calculate lux using perceived luminance
-                self._lux = (
-                    self._perceived_luminance
-                    * self._luminance_to_lux_calibration_factor
+                self.lux = (
+                    self.perceived_luminance * self.luminance_to_lux_calibration_factor
                 )
 
-                _LOGGER.debug("%s updated to %s %s", self.name, self._lux, LIGHT_LUX)
-
+                _LOGGER.debug(
+                    "%s updated to %s %s", self._attr_name, self.lux, UNIT_LUX
+                )
             else:
-                self._avg_luminance = None
-                self._perceived_luminance = None
-                self._lux = None
+                self.avg_luminance = None
+                self.perceived_luminance = None
+                self.lux = None
 
-        except Exception as e:
-            self._avg_luminance = None
-            self._perceived_luminance = None
-            self._lux = None
-
-            _LOGGER.error(
-                "Error updating CameraLux sensor '%s': %s",
-                self.name,
-                e,
-            )
-
+        except Exception as e:  # noqa: BLE001
+            self.avg_luminance = None
+            self.perceived_luminance = None
+            self.lux = None
+            _LOGGER.error("Error updating CameraLux '%s': %s", self._attr_name, e)
         finally:
-            self._is_updating = False
+            self.is_updating = False
             self.async_schedule_update_ha_state(force_refresh=True)
 
     async def async_get_image_from_camera_entity_id(
         self, entity_id: str
     ) -> Image.Image | None:
-        """Retrieve Camera image from entity ID."""
-
-        # also considered homeassistant.components.camera.helper.get_camera_from_entity_id
-        if (component := self.hass.data.get(CAMERA_DATA_COMPONENT)) is None:
+        """Fetch a snapshot from a Home Assistant camera entity."""
+        component = self.hass.data.get("camera")
+        if component is None:
             _LOGGER.critical("Camera integration not set up")
             return None
 
-        if (camera := component.get_entity(entity_id)) is None:
+        camera = component.get_entity(entity_id)
+        if camera is None:
             _LOGGER.error("Camera entity %s not found", entity_id)
             return None
 
-        if not camera.is_on:
-            _LOGGER.warning("Camera %s is off", entity_id)
+        try:
+            image_bytes = await camera.async_camera_image()
+        except Exception as e:  # camera may raise HomeAssistantError
+            _LOGGER.error("Error retrieving image from camera %s: %s", entity_id, e)
             return None
 
-        if not camera.available:
-            _LOGGER.warning("Camera %s is not available", entity_id)
-            return None
-
-        image_bytes = await camera.async_camera_image()
-        if image_bytes:
-            image = Image.open(io.BytesIO(image_bytes))
-            image.load()
-            _LOGGER.debug("%s retrieved image from camera %s", self.name, entity_id)
-            return image
-        else:
+        if not image_bytes:
             _LOGGER.warning("Camera %s image not ready", entity_id)
             return None
 
+        try:
+            image = Image.open(io.BytesIO(image_bytes))
+            image.load()
+            _LOGGER.debug(
+                "%s retrieved image from camera %s", self._attr_name, entity_id
+            )
+            return image
+        except (UnidentifiedImageError, OSError, ValueError) as e:
+            _LOGGER.error("Invalid image bytes from camera %s: %s", entity_id, e)
+            return None
+
     async def async_fetch_image_from_url(self, url: str) -> Image.Image | None:
-        """
-        Asynchronously fetch an image from the provided HTTP URL.
-        """
+        """Fetch an image from a URL using HA's shared aiohttp session."""
         session = async_get_clientsession(self.hass)
         try:
-            async with session.get(url, timeout=10) as response:
-                if response.status == 200:
-                    content = await response.read()
-                    _LOGGER.debug("%s fetched image from URL '%s'", self.name, url)
-
-                    image = Image.open(io.BytesIO(content))
-                    image.load()
-                    return image
-                else:
-                    _LOGGER.warning(
+            async with session.get(url, timeout=15) as response:
+                if response.status != 200:
+                    _LOGGER.error(
                         "Failed to fetch %s image from URL '%s': HTTP %d",
-                        self.name,
+                        self._attr_name,
                         url,
                         response.status,
                     )
                     return None
-
+                content = await response.read()
         except aiohttp.ClientError as e:
-            _LOGGER.warning(
+            _LOGGER.error(
                 "HTTP error while fetching %s image from URL '%s': %s",
-                self.name,
+                self._attr_name,
                 url,
                 e,
             )
             return None
-
         except asyncio.TimeoutError:
-            _LOGGER.warning(
-                "Timeout while fetching %s image from URL '%s'", self.name, url
+            _LOGGER.error(
+                "Timeout while fetching %s image from URL '%s'", self._attr_name, url
             )
+            return None
+
+        try:
+            image = Image.open(io.BytesIO(content))
+            image.load()
+            _LOGGER.debug("%s fetched image from URL '%s'", self._attr_name, url)
+            return image
+        except (UnidentifiedImageError, OSError, ValueError) as e:
+            _LOGGER.error("Invalid image content from URL '%s': %s", url, e)
             return None
 
     def crop_image(
         self, image: Image.Image, roi_config: Optional[Dict[str, int]]
     ) -> Image.Image:
-        """
-        Crop the image based on the region of interest (ROI). Returns the entire image if ROI is not specified
-        """
+        """Crop the image to the provided ROI; treat 0 width/height as full dimension."""
         if not roi_config:
             return image
 
         img_width, img_height = image.size
-        x, y = roi_config.get("x", 0), roi_config.get("y", 0)
-        w, h = roi_config.get("width", img_width), roi_config.get("height", img_height)
+        x = roi_config.get(CONF_X, 0) or 0
+        y = roi_config.get(CONF_Y, 0) or 0
+        w = roi_config.get(CONF_WIDTH, 0) or img_width
+        h = roi_config.get(CONF_HEIGHT, 0) or img_height
 
-        # Adjust ROI coordinates and dimensions to fit within image dimensions
         x = max(0, min(x, img_width - 1))
         y = max(0, min(y, img_height - 1))
         w = min(w, img_width - x)
         h = min(h, img_height - y)
 
         if w <= 0 or h <= 0:
-            raise ValueError(f"Invalid ROI dimensions after adjustment: {roi_config}")
+            _LOGGER.warning(
+                "Invalid ROI after clamping for '%s': %s", self._attr_name, roi_config
+            )
+            return image
 
         _LOGGER.debug(
-            "%s image cropped to ROI: x=%d, y=%d, width=%d, height=%d",
-            self.name,
-            x,
-            y,
-            w,
-            h,
+            "%s ROI: x=%d, y=%d, width=%d, height=%d", self._attr_name, x, y, w, h
         )
         return image.crop((x, y, x + w, y + h))
 
     def resize_image(self, image: Image.Image, max_pixels: int) -> Image.Image:
-        """
-        Resize an image to have at most max_pixels using high quality Lanczos filter
-        """
-        # Calculate the total number of pixels in the image
+        """Resize the image if it exceeds max_pixels, preserving aspect ratio."""
         width, height = image.size
         total_pixels = width * height
-
         if total_pixels <= max_pixels:
             return image
 
-        # Calculate the scaling factor to reduce the image to max_pixels
-        scale_factor = math.sqrt(max_pixels / total_pixels)
-        new_width = max(1, int(width * scale_factor))
-        new_height = max(1, int(height * scale_factor))
+        scale = math.sqrt(max_pixels / total_pixels)
+        new_w = max(1, int(width * scale))
+        new_h = max(1, int(height * scale))
 
         _LOGGER.debug(
-            "%s image scaled from (%d x %d) to (%d x %d) to reduce total pixels from %d to <= %d",
-            self.name,
+            "%s scaled from (%d x %d) to (%d x %d) for <= %d px",
+            self._attr_name,
             width,
             height,
-            new_width,
-            new_height,
-            total_pixels,
+            new_w,
+            new_h,
             max_pixels,
         )
-
-        # Resize the image using resampling filter
-        return image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        return image.resize((new_w, new_h), RESAMPLE)
 
     def calculate_image_luminance(self, image: Image.Image) -> tuple[float, float]:
-        """
-        Calculate image average pixel luminance and perceived luminance.
-        Supports:
-            - 8-bit sRGB images (RGB or RGBA)
-            - 16-bit linear grayscale images (I;16)
-            - Linear images (F, I)
-            - Converts common image modes (P, CMYK) to RGB before processing
-            - If there's an alpha channel, it is stripped off before luminance calculation.
-        Returns:
-            A tuple containing (avg_luminance, perceived_luminance).
-        """
-
+        """Compute average and perceived luminance from an image in linear space."""
         MODE_GRAYSCALE = "L"
         MODE_PALETTE = "P"
         MODE_CMYK = "CMYK"
@@ -539,54 +550,44 @@ class CameraLuxSensor(SensorEntity):
         MODE_FLOAT = "F"
         MODE_LINEAR = "I"
 
-        # Convert palette and CMYK images to RGB
         if image.mode in [MODE_PALETTE, MODE_CMYK]:
             image = image.convert(MODE_RGB)
 
         img_pixels = np.array(image)
 
-        # Remove alpha channel if present
         if img_pixels.ndim == 3 and img_pixels.shape[2] > 3:
             img_pixels = img_pixels[:, :, :3]
 
-        # Normalize pixel values depending on mode/bit-depth
         if image.mode == MODE_16_BIT_GRAYSCALE:
-            # 16-bit linear grayscale
-            linearized_pixels = img_pixels.astype(np.float32) / 65535.0
-
+            linearized = img_pixels.astype(np.float32) / 65535.0
         elif image.mode in [MODE_LINEAR, MODE_FLOAT]:
-            # 32-bit images
-            linearized_pixels = img_pixels.astype(np.float32)
-
+            linearized = img_pixels.astype(np.float32)
         elif image.mode in [MODE_RGB, MODE_RGBA, MODE_GRAYSCALE]:
-            # 8-bit gamma encoded (sRGB/Grayscale)
-            linearized_pixels = np.take(INVERSE_GAMMA_LUT, img_pixels.astype(np.uint8))
-
+            linearized = INVERSE_GAMMA_LUT[img_pixels.astype(np.uint8)]
         else:
-            raise ValueError(f"Unsupported image mode: {image.mode}")
+            try:
+                image = image.convert(MODE_RGB)
+                img_pixels = np.array(image)
+                linearized = INVERSE_GAMMA_LUT[img_pixels.astype(np.uint8)]
+            except Exception as e:  # noqa: BLE001
+                raise ValueError(f"Unsupported image mode: {image.mode}") from e
 
-        if linearized_pixels.ndim == 2:
-            # Grayscale
-            y = linearized_pixels
-
+        if linearized.ndim == 2:
+            y_plane = linearized
         else:
-            # For RGB, compute luminance (Y) using Rec. 709 coefficients
-            y = (
-                0.2126 * linearized_pixels[:, :, 0]
-                + 0.7152 * linearized_pixels[:, :, 1]
-                + 0.0722 * linearized_pixels[:, :, 2]
+            y_plane = (
+                0.2126 * linearized[:, :, 0]
+                + 0.7152 * linearized[:, :, 1]
+                + 0.0722 * linearized[:, :, 2]
             )
 
-        avg_luminance = np.mean(y)
-
-        # Apply Weber–Fechner Law to approximate human perception
-        perceived_luminance = np.log1p(avg_luminance)
-
+        avg_lum = float(np.mean(y_plane))
+        perceived = float(np.log1p(avg_lum))
         _LOGGER.debug(
-            "%s avg pixel luminance %f perceived luminance %f from %s image",
-            self.name,
-            avg_luminance,
-            perceived_luminance,
+            "%s luminance avg=%f perceived=%f from %s",
+            self._attr_name,
+            avg_lum,
+            perceived,
             image.mode,
         )
-        return float(avg_luminance), float(perceived_luminance)
+        return avg_lum, perceived

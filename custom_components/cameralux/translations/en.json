@@ -1,0 +1,53 @@
+{
+  "title": "Camera Lux",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add Camera Lux Sensor",
+        "description": "Select a source (camera or image URL)",
+        "data": {
+          "name": "Name",
+          "source": "Source",
+          "entity_id": "Camera entity",
+          "image_url": "Image URL",
+          "calibration_factor": "Calibration factor",
+          "update_interval": "Update interval (seconds)",
+          "roi_enabled": "Region of Interest (ROI)",
+          "x": "ROI x",
+          "y": "ROI y",
+          "width": "ROI width",
+          "height": "ROI height"
+        }
+      }
+    },
+    "error": {
+      "need_source": "Pick either a camera or an image URL.",
+      "pick_one_source": "Please provide only one: camera OR image URL.",
+      "required": "This field is required."
+    },
+    "abort": {
+      "need_source": "You must provide either a camera entity or an image URL.",
+      "already_configured": "This Camera Lux sensor is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "edit": {
+        "title": "Camera Lux Options",
+        "description": "Update source, ROI, or sampling settings.",
+        "data": {
+          "source": "Source",
+          "entity_id": "Camera entity",
+          "image_url": "Image URL",
+          "calibration_factor": "Calibration factor",
+          "update_interval": "Update interval (seconds)",
+          "roi_enabled": "Region of Interest (ROI)",
+          "x": "ROI x",
+          "y": "ROI y",
+          "width": "ROI width",
+          "height": "ROI height"
+        }
+      }
+    }
+  }
+}
