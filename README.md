@@ -2,6 +2,8 @@
 
 **Camera Lux** is a custom Home Assistant integration that utilizes camera feeds to estimate ambient light levels (lux) in your environment. By analyzing images from your cameras, `cameralux` provides virtual lux readings that can be used to automate lighting, monitor lighting conditions, and enhance your smart home setup.
 
+<img width="600"  alt="image" src="https://github.com/user-attachments/assets/51281257-7776-4a9e-a031-4f7a2e0d4e7a" />
+
 ## Features
 
 - **Real-Time Lux Monitoring:** Continuously estimate ambient light levels using your existing cameras.
@@ -59,3 +61,4 @@ sensor:
    - Download the `cameralux` repository from [GitHub](https://github.com/markfrancisonly/ha-cameralux).
    - Place the `cameralux` folder inside your `custom_components` directory.
    - Restart Home Assistant.
+
