@@ -12,7 +12,7 @@
 - **Calibration Factor:** Scale luminance to lux calculations to better align with real-world lighting conditions.
 - **Compatibility:** Works with any camera integrated into Home Assistant, supporting both camera entities and direct image URLs.
 
-## Configuration Parameters
+## Configuration 
 
 - **`entity_id`**: The camera entity from which to fetch images.
 - **`image_url`** *(optional)*: Direct HTTP URL pointing to an image file (e.g., JPEG, PNG).
@@ -25,30 +25,7 @@
 - **`calibration_factor`** *(optional)*: A float value to calibrate the percieved luminance to lux. Defaults to 2000 if not specified.
 
 **Note:** Each sensor must have either `entity_id` or `image_url` configured, but not both.
-
-## Example Configuration
-
-Add the following to your `configuration.yaml`:
-
-```yaml
-sensor:
-  - platform: cameralux
-    sensors:
-      Office Wallpanel lux:
-        entity_id: camera.rtsp_office_wallpanel
-        calibration_factor: 1250
-        update_interval: 30  # Updates every 30 seconds
-        brightness_roi:
-          x: 100
-          y: 150
-          width: 200
-          height: 100
-      Kitchen Image lux:
-        image_url: https://your-domain.com/images/kitchen.jpg
-        calibration_factor: 500
-        update_interval: 45  # Updates every 45 seconds
-```
-
+ 
 ## Installation
 
 1. **Using HACS (Recommended):**
@@ -61,4 +38,5 @@ sensor:
    - Download the `cameralux` repository from [GitHub](https://github.com/markfrancisonly/ha-cameralux).
    - Place the `cameralux` folder inside your `custom_components` directory.
    - Restart Home Assistant.
+
 
