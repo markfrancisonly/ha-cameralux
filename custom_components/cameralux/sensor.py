@@ -7,13 +7,11 @@ import asyncio
 import hashlib
 import io
 import logging
-import math
 from datetime import datetime, timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import aiohttp
 import homeassistant.helpers.config_validation as cv
-import numpy as np
 import voluptuous as vol
 from homeassistant.components.sensor import (
     PLATFORM_SCHEMA,
@@ -60,54 +58,31 @@ from .const import (
     SUGGESTED_DISPLAY_PRECISION,
 )
 
+from .helpers import (
+    calculate_image_luminance,
+    coerce_float,
+    crop_image,
+    get_bounded_int,
+    resize_image,
+)
+
 _LOGGER = logging.getLogger(__name__)
 
-# Resampling fallback (older Pillow)
-try:
-    RESAMPLE = Image.Resampling.LANCZOS  # Pillow >= 9.1
-except Exception:  # noqa: BLE001
-    RESAMPLE = Image.LANCZOS
 
+def build_unique_id(
+    camera_entity_id: str | None, image_url: str | None, sensor_name: str
+) -> str | None:
+    """Construct a unique_id from source info and a hash of the name."""
+    name_tag = hashlib.md5(sensor_name.encode()).hexdigest()[:8]
+    if camera_entity_id:
+        base = f"cameralux_{camera_entity_id.replace('.', '_')}"
+        return f"{base}_{name_tag}"
+    if image_url:
+        url_hash = hashlib.md5(image_url.encode()).hexdigest()
+        base = f"cameralux_url_{url_hash}"
+        return f"{base}_{name_tag}"
+    return None
 
-def get_bounded_int(
-    val,
-    default: int = 0,
-    min_value: int | None = None,
-    max_value: int | None = None,
-) -> int:
-    """Coerce a value to int, falling back to default and clamping to [min_value, max_value] if provided."""
-    try:
-        iv = int(val)
-    except (TypeError, ValueError):
-        iv = default
-    if min_value is not None and iv < min_value:
-        iv = min_value
-    if max_value is not None and iv > max_value:
-        iv = max_value
-    return iv
-
-
-def coerce_float(val, default: float) -> float:
-    """Coerce a value to float, returning default on failure."""
-    try:
-        return float(val)
-    except (TypeError, ValueError):
-        return default
-
-
-def precompute_inverse_gamma_8bit_lut() -> np.ndarray:
-    """Generate a 256-entry inverse gamma LUT to linearize sRGB 8-bit values."""
-    lut = np.zeros(256, dtype=np.float32)
-    for i in range(256):
-        normalized = i / 255.0
-        if normalized <= 0.04045:
-            lut[i] = normalized / 12.92
-        else:
-            lut[i] = ((normalized + 0.055) / 1.055) ** 2.4
-    return lut
-
-
-INVERSE_GAMMA_LUT = precompute_inverse_gamma_8bit_lut()
 
 # YAML schemas (kept for import support)
 BRIGHTNESS_ROI_SCHEMA = vol.Schema(
@@ -276,7 +251,7 @@ class CameraLuxSensor(SensorEntity):
                 name,
             )
 
-        self._attr_unique_id = stable_unique_id or self.build_unique_id(
+        self._attr_unique_id = stable_unique_id or build_unique_id(
             camera_entity_id=self.camera_entity_id,
             image_url=self.image_url,
             sensor_name=name,
@@ -297,21 +272,6 @@ class CameraLuxSensor(SensorEntity):
                 self.luminance_to_lux_calibration_factor,
                 "enabled" if self.roi_enabled else "disabled",
             )
-
-    @staticmethod
-    def build_unique_id(
-        camera_entity_id: str | None, image_url: str | None, sensor_name: str
-    ) -> str | None:
-        """Build a unique_id from the configured source and a short hash of the sensor name."""
-        name_tag = hashlib.md5(sensor_name.encode()).hexdigest()[:8]
-        if camera_entity_id:
-            base = f"cameralux_{camera_entity_id.replace('.', '_')}"
-            return f"{base}_{name_tag}"
-        if image_url:
-            url_hash = hashlib.md5(image_url.encode()).hexdigest()
-            base = f"cameralux_url_{url_hash}"
-            return f"{base}_{name_tag}"
-        return None
 
     @property
     def available(self) -> bool:
@@ -389,11 +349,11 @@ class CameraLuxSensor(SensorEntity):
 
             if image:
                 roi_for_calc = self.roi if self.roi_enabled else None
-                cropped_image = self.crop_image(image, roi_for_calc)
-                resized_image = self.resize_image(cropped_image, MAX_PIXELS)
+                cropped_image = crop_image(image, roi_for_calc)
+                resized_image = resize_image(cropped_image, MAX_PIXELS)
 
                 self.avg_luminance, self.perceived_luminance = (
-                    self.calculate_image_luminance(resized_image)
+                    calculate_image_luminance(resized_image)
                 )
                 self.lux = (
                     self.perceived_luminance * self.luminance_to_lux_calibration_factor
@@ -493,106 +453,3 @@ class CameraLuxSensor(SensorEntity):
             _LOGGER.error("Invalid image content from URL '%s': %s", url, e)
             return None
 
-    def crop_image(
-        self, image: Image.Image, roi_config: Optional[Dict[str, int]]
-    ) -> Image.Image:
-        """Crop the image to the provided ROI; treat 0 width/height as full dimension."""
-        if not roi_config:
-            return image
-
-        img_width, img_height = image.size
-        x = roi_config.get(CONF_X, 0) or 0
-        y = roi_config.get(CONF_Y, 0) or 0
-        w = roi_config.get(CONF_WIDTH, 0) or img_width
-        h = roi_config.get(CONF_HEIGHT, 0) or img_height
-
-        x = max(0, min(x, img_width - 1))
-        y = max(0, min(y, img_height - 1))
-        w = min(w, img_width - x)
-        h = min(h, img_height - y)
-
-        if w <= 0 or h <= 0:
-            _LOGGER.warning(
-                "Invalid ROI after clamping for '%s': %s", self._attr_name, roi_config
-            )
-            return image
-
-        _LOGGER.debug(
-            "%s ROI: x=%d, y=%d, width=%d, height=%d", self._attr_name, x, y, w, h
-        )
-        return image.crop((x, y, x + w, y + h))
-
-    def resize_image(self, image: Image.Image, max_pixels: int) -> Image.Image:
-        """Resize the image if it exceeds max_pixels, preserving aspect ratio."""
-        width, height = image.size
-        total_pixels = width * height
-        if total_pixels <= max_pixels:
-            return image
-
-        scale = math.sqrt(max_pixels / total_pixels)
-        new_w = max(1, int(width * scale))
-        new_h = max(1, int(height * scale))
-
-        _LOGGER.debug(
-            "%s scaled from (%d x %d) to (%d x %d) for <= %d px",
-            self._attr_name,
-            width,
-            height,
-            new_w,
-            new_h,
-            max_pixels,
-        )
-        return image.resize((new_w, new_h), RESAMPLE)
-
-    def calculate_image_luminance(self, image: Image.Image) -> tuple[float, float]:
-        """Compute average and perceived luminance from an image in linear space."""
-        MODE_GRAYSCALE = "L"
-        MODE_PALETTE = "P"
-        MODE_CMYK = "CMYK"
-        MODE_RGB = "RGB"
-        MODE_RGBA = "RGBA"
-        MODE_16_BIT_GRAYSCALE = "I;16"
-        MODE_FLOAT = "F"
-        MODE_LINEAR = "I"
-
-        if image.mode in [MODE_PALETTE, MODE_CMYK]:
-            image = image.convert(MODE_RGB)
-
-        img_pixels = np.array(image)
-
-        if img_pixels.ndim == 3 and img_pixels.shape[2] > 3:
-            img_pixels = img_pixels[:, :, :3]
-
-        if image.mode == MODE_16_BIT_GRAYSCALE:
-            linearized = img_pixels.astype(np.float32) / 65535.0
-        elif image.mode in [MODE_LINEAR, MODE_FLOAT]:
-            linearized = img_pixels.astype(np.float32)
-        elif image.mode in [MODE_RGB, MODE_RGBA, MODE_GRAYSCALE]:
-            linearized = INVERSE_GAMMA_LUT[img_pixels.astype(np.uint8)]
-        else:
-            try:
-                image = image.convert(MODE_RGB)
-                img_pixels = np.array(image)
-                linearized = INVERSE_GAMMA_LUT[img_pixels.astype(np.uint8)]
-            except Exception as e:  # noqa: BLE001
-                raise ValueError(f"Unsupported image mode: {image.mode}") from e
-
-        if linearized.ndim == 2:
-            y_plane = linearized
-        else:
-            y_plane = (
-                0.2126 * linearized[:, :, 0]
-                + 0.7152 * linearized[:, :, 1]
-                + 0.0722 * linearized[:, :, 2]
-            )
-
-        avg_lum = float(np.mean(y_plane))
-        perceived = float(np.log1p(avg_lum))
-        _LOGGER.debug(
-            "%s luminance avg=%f perceived=%f from %s",
-            self._attr_name,
-            avg_lum,
-            perceived,
-            image.mode,
-        )
-        return avg_lum, perceived

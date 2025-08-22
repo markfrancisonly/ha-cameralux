@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ha-cameralux"
+version = "0.1.0"
+description = "Camera-based lux sensor for Home Assistant"
+readme = "README.md"
+requires-python = ">=3.11"
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7",
+    "pillow>=10",
+    "numpy>=1.24",
+]
