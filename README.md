@@ -22,7 +22,7 @@
   - **`y`**: The y-coordinate of the top-left corner of the ROI.
   - **`width`**: The width of the ROI.
   - **`height`**: The height of the ROI.
-- **`calibration_factor`** *(optional)*: A float value to calibrate the percieved luminance to lux. Defaults to 2000 if not specified.
+- **`calibration_factor`** *(optional)*: A float value to calibrate the perceived luminance to lux. Defaults to 2000 if not specified.
 
 **Note:** Each sensor must have either `entity_id` or `image_url` configured, but not both.
  
