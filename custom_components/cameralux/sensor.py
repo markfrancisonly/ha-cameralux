@@ -407,6 +407,9 @@ class CameraLuxSensor(SensorEntity):
                 self.perceived_luminance = None
                 self.lux = None
 
+        except asyncio.CancelledError:
+            # Propagate task cancellation to avoid blocking shutdown
+            raise
         except Exception as e:  # noqa: BLE001
             self.avg_luminance = None
             self.perceived_luminance = None
@@ -432,6 +435,8 @@ class CameraLuxSensor(SensorEntity):
 
         try:
             image_bytes = await camera.async_camera_image()
+        except asyncio.CancelledError:
+            raise
         except Exception as e:  # camera may raise HomeAssistantError
             _LOGGER.error("Error retrieving image from camera %s: %s", entity_id, e)
             return None
