@@ -45,6 +45,8 @@ from .const import (
     CONF_ROI_ENABLED,
     CONF_SENSORS,
     CONF_SOURCE,
+    CONF_UNAVAILABLE_BELOW,
+    CONF_UNAVAILABLE_ABOVE,
     CONF_UPDATE_INTERVAL,
     CONF_WIDTH,
     CONF_X,
@@ -106,6 +108,12 @@ SENSOR_SCHEMA = vol.Schema(
         vol.Optional(CONF_UPDATE_INTERVAL, default=DEFAULT_UPDATE_INTERVAL): vol.All(
             vol.Coerce(int), vol.Range(min=5, max=3600)
         ),
+        vol.Optional(CONF_UNAVAILABLE_BELOW): vol.All(
+            vol.Coerce(float), vol.Range(min=0)
+        ),
+        vol.Optional(CONF_UNAVAILABLE_ABOVE): vol.All(
+            vol.Coerce(float), vol.Range(min=0)
+        ),
     },
     extra=vol.ALLOW_EXTRA,
 )
@@ -135,6 +143,8 @@ async def async_setup_platform(
             CONF_UPDATE_INTERVAL: sensor_config.get(
                 CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL
             ),
+            CONF_UNAVAILABLE_BELOW: sensor_config.get(CONF_UNAVAILABLE_BELOW),
+            CONF_UNAVAILABLE_ABOVE: sensor_config.get(CONF_UNAVAILABLE_ABOVE),
         }
         hass.async_create_task(
             hass.config_entries.flow.async_init(
@@ -166,15 +176,17 @@ async def async_setup_entry(
         )
         image_url = None
 
-    cfg = {
-        CONF_ENTITY_ID: camera_entity,
-        CONF_IMAGE_URL: image_url,
-        CONF_BRIGHTNESS_ROI: data.get(CONF_BRIGHTNESS_ROI, {}),
-        CONF_CALIBRATION_FACTOR: data.get(
-            CONF_CALIBRATION_FACTOR, DEFAULT_CALIBRATION_FACTOR
-        ),
-        CONF_UPDATE_INTERVAL: data.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
-    }
+        cfg = {
+            CONF_ENTITY_ID: camera_entity,
+            CONF_IMAGE_URL: image_url,
+            CONF_BRIGHTNESS_ROI: data.get(CONF_BRIGHTNESS_ROI, {}),
+            CONF_CALIBRATION_FACTOR: data.get(
+                CONF_CALIBRATION_FACTOR, DEFAULT_CALIBRATION_FACTOR
+            ),
+            CONF_UPDATE_INTERVAL: data.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
+            CONF_UNAVAILABLE_BELOW: data.get(CONF_UNAVAILABLE_BELOW),
+            CONF_UNAVAILABLE_ABOVE: data.get(CONF_UNAVAILABLE_ABOVE),
+        }
 
     # Use entry.entry_id as the stable unique_id so Options edits never change the entity id.
     async_add_entities(
@@ -244,6 +256,20 @@ class CameraLuxSensor(SensorEntity):
             5,
             3600,
         )
+        unavail_below_cfg = config.get(CONF_UNAVAILABLE_BELOW)
+        unavail_above_cfg = config.get(CONF_UNAVAILABLE_ABOVE)
+        try:
+            self.unavailable_below: float | None = (
+                float(unavail_below_cfg) if unavail_below_cfg is not None else None
+            )
+        except (TypeError, ValueError):
+            self.unavailable_below = None
+        try:
+            self.unavailable_above: float | None = (
+                float(unavail_above_cfg) if unavail_above_cfg is not None else None
+            )
+        except (TypeError, ValueError):
+            self.unavailable_above = None
 
         if not self.camera_entity_id and not self.image_url:
             _LOGGER.error(
@@ -293,6 +319,8 @@ class CameraLuxSensor(SensorEntity):
                 "perceived_luminance": self.perceived_luminance,
                 "roi_enabled": self.roi_enabled,
                 "roi": self.roi,
+                "unavailable_below": self.unavailable_below,
+                "unavailable_above": self.unavailable_above,
             }
         return {}
 
@@ -358,10 +386,22 @@ class CameraLuxSensor(SensorEntity):
                 self.lux = (
                     self.perceived_luminance * self.luminance_to_lux_calibration_factor
                 )
-
-                _LOGGER.debug(
-                    "%s updated to %s %s", self._attr_name, self.lux, UNIT_LUX
-                )
+                if (
+                    (self.unavailable_below is not None and self.lux <= self.unavailable_below)
+                    or (self.unavailable_above is not None and self.lux >= self.unavailable_above)
+                ):
+                    _LOGGER.debug(
+                        "%s lux %s hit unavailable threshold; setting unavailable",
+                        self._attr_name,
+                        self.lux,
+                    )
+                    self.avg_luminance = None
+                    self.perceived_luminance = None
+                    self.lux = None
+                else:
+                    _LOGGER.debug(
+                        "%s updated to %s %s", self._attr_name, self.lux, UNIT_LUX
+                    )
             else:
                 self.avg_luminance = None
                 self.perceived_luminance = None
