@@ -16,6 +16,8 @@ from .const import (
     CONF_IMAGE_URL,
     CONF_ROI_ENABLED,
     CONF_SOURCE,
+    CONF_UNAVAILABLE_BELOW,
+    CONF_UNAVAILABLE_ABOVE,
     CONF_UPDATE_INTERVAL,
     CONF_WIDTH,
     CONF_X,
@@ -54,6 +56,18 @@ def int_if_value(value) -> int | None:
         return None
 
 
+def float_if_value(value) -> float | None:
+    """Return float(value) if it is a real value; otherwise None."""
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip() == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 class CameraLuxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Config flow for CameraLux."""
 
@@ -69,6 +83,8 @@ class CameraLuxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         image_url_def = ""
         cal_def = 2000
         interval_def = 30
+        unavail_below_def = None
+        unavail_above_def = None
         roi_enabled_ui = False
 
         x_def = y_def = w_def = h_def = None
@@ -80,6 +96,12 @@ class CameraLuxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             image_url_def = (user_input.get(CONF_IMAGE_URL) or "").strip()
             cal_def = int(user_input.get(CONF_CALIBRATION_FACTOR, 2000))
             interval_def = int(user_input.get(CONF_UPDATE_INTERVAL, 30))
+            unavail_below_def = float_if_value(
+                user_input.get(CONF_UNAVAILABLE_BELOW)
+            )
+            unavail_above_def = float_if_value(
+                user_input.get(CONF_UNAVAILABLE_ABOVE)
+            )
             roi_enabled_ui = bool(user_input.get(UI_ROI_ENABLED, False))
 
             if CONF_X in user_input:
@@ -122,6 +144,8 @@ class CameraLuxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_BRIGHTNESS_ROI: roi_dict,
                     CONF_CALIBRATION_FACTOR: float(cal_def),
                     CONF_UPDATE_INTERVAL: int(interval_def),
+                    CONF_UNAVAILABLE_BELOW: unavail_below_def,
+                    CONF_UNAVAILABLE_ABOVE: unavail_above_def,
                 }
                 unique_id = build_entry_unique_id(name_def, chosen_entity, chosen_url)
                 await self.async_set_unique_id(unique_id)
@@ -157,6 +181,22 @@ class CameraLuxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         fields[vol.Optional(CONF_UPDATE_INTERVAL, default=interval_def)] = (
             selector.selector({"number": {"min": 5, "step": 1, "mode": "box"}})
         )
+        if unavail_below_def is not None:
+            fields[vol.Optional(CONF_UNAVAILABLE_BELOW, default=unavail_below_def)] = (
+                selector.selector({"number": {"min": 0, "mode": "box"}})
+            )
+        else:
+            fields[vol.Optional(CONF_UNAVAILABLE_BELOW)] = selector.selector(
+                {"number": {"min": 0, "mode": "box"}}
+            )
+        if unavail_above_def is not None:
+            fields[vol.Optional(CONF_UNAVAILABLE_ABOVE, default=unavail_above_def)] = (
+                selector.selector({"number": {"min": 0, "mode": "box"}})
+            )
+        else:
+            fields[vol.Optional(CONF_UNAVAILABLE_ABOVE)] = selector.selector(
+                {"number": {"min": 0, "mode": "box"}}
+            )
         fields[vol.Required(UI_ROI_ENABLED, default=roi_enabled_ui)] = (
             selector.selector({"boolean": {}})
         )
@@ -243,6 +283,12 @@ class CameraLuxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 import_config.get(CONF_CALIBRATION_FACTOR, 2000.0)
             ),
             CONF_UPDATE_INTERVAL: int(import_config.get(CONF_UPDATE_INTERVAL, 30)),
+            CONF_UNAVAILABLE_BELOW: float_if_value(
+                import_config.get(CONF_UNAVAILABLE_BELOW)
+            ),
+            CONF_UNAVAILABLE_ABOVE: float_if_value(
+                import_config.get(CONF_UNAVAILABLE_ABOVE)
+            ),
         }
 
         unique_id = build_entry_unique_id(name, chosen_entity, chosen_url)
@@ -278,6 +324,8 @@ class CameraLuxOptionsFlow(config_entries.OptionsFlow):
         url_def = data.get(CONF_IMAGE_URL) or ""
         cal_def = int(data.get(CONF_CALIBRATION_FACTOR, 2000))
         interval_def = int(data.get(CONF_UPDATE_INTERVAL, 30))
+        unavail_below_def = float_if_value(data.get(CONF_UNAVAILABLE_BELOW))
+        unavail_above_def = float_if_value(data.get(CONF_UNAVAILABLE_ABOVE))
 
         roi = data.get(CONF_BRIGHTNESS_ROI) or {}
         roi_enabled_def = bool(roi.get(CONF_ROI_ENABLED, False))
@@ -292,6 +340,12 @@ class CameraLuxOptionsFlow(config_entries.OptionsFlow):
             url_in = (user_input.get(CONF_IMAGE_URL) or "").strip()
             cal_in = int(user_input.get(CONF_CALIBRATION_FACTOR, cal_def))
             interval_in = int(user_input.get(CONF_UPDATE_INTERVAL, interval_def))
+            unavail_below_in = float_if_value(
+                user_input.get(CONF_UNAVAILABLE_BELOW)
+            )
+            unavail_above_in = float_if_value(
+                user_input.get(CONF_UNAVAILABLE_ABOVE)
+            )
             roi_enabled_in = bool(user_input.get(UI_ROI_ENABLED, roi_enabled_def))
 
             roi_new: dict = {CONF_ROI_ENABLED: roi_enabled_in}
@@ -323,6 +377,8 @@ class CameraLuxOptionsFlow(config_entries.OptionsFlow):
                     CONF_CALIBRATION_FACTOR: float(cal_in),
                     CONF_UPDATE_INTERVAL: int(interval_in),
                     CONF_BRIGHTNESS_ROI: roi_new,
+                    CONF_UNAVAILABLE_BELOW: unavail_below_in,
+                    CONF_UNAVAILABLE_ABOVE: unavail_above_in,
                 }
                 return self.async_create_entry(title="", data=new_opts)
 
@@ -331,6 +387,8 @@ class CameraLuxOptionsFlow(config_entries.OptionsFlow):
             url_def = url_in
             cal_def = cal_in
             interval_def = interval_in
+            unavail_below_def = unavail_below_in
+            unavail_above_def = unavail_above_in
             roi_enabled_def = roi_enabled_in
             x_def = roi_new.get(CONF_X, x_def)
             y_def = roi_new.get(CONF_Y, y_def)
@@ -365,6 +423,23 @@ class CameraLuxOptionsFlow(config_entries.OptionsFlow):
         fields[vol.Required(CONF_UPDATE_INTERVAL, default=interval_def)] = (
             selector.selector({"number": {"min": 5, "step": 1, "mode": "box"}})
         )
+
+        if unavail_below_def is not None:
+            fields[vol.Optional(CONF_UNAVAILABLE_BELOW, default=unavail_below_def)] = (
+                selector.selector({"number": {"min": 0, "mode": "box"}})
+            )
+        else:
+            fields[vol.Optional(CONF_UNAVAILABLE_BELOW)] = selector.selector(
+                {"number": {"min": 0, "mode": "box"}}
+            )
+        if unavail_above_def is not None:
+            fields[vol.Optional(CONF_UNAVAILABLE_ABOVE, default=unavail_above_def)] = (
+                selector.selector({"number": {"min": 0, "mode": "box"}})
+            )
+        else:
+            fields[vol.Optional(CONF_UNAVAILABLE_ABOVE)] = selector.selector(
+                {"number": {"min": 0, "mode": "box"}}
+            )
 
         fields[vol.Required(UI_ROI_ENABLED, default=roi_enabled_def)] = (
             selector.selector({"boolean": {}})

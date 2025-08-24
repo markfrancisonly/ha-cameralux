@@ -21,6 +21,8 @@ CONF_HEIGHT = "height"
 # Other config
 CONF_CALIBRATION_FACTOR = "calibration_factor"
 CONF_UPDATE_INTERVAL = "update_interval"
+CONF_UNAVAILABLE_BELOW = "unavailable_below"
+CONF_UNAVAILABLE_ABOVE = "unavailable_above"
 
 # UI-only helper keys (persisted in entry data/options as needed)
 CONF_SOURCE = "source"  # "camera" or "url"

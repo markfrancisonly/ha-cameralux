@@ -10,6 +10,7 @@
 - **Configurable Update Intervals:** Customize how frequently each sensor updates its lux readings.
 - **Region of Interest (ROI):** Focus on specific areas within the camera's field of view for more accurate measurements.
 - **Calibration Factor:** Scale luminance to lux calculations to better align with real-world lighting conditions.
+- **Unavailable Lux Thresholds:** Optionally mark the sensor unavailable when lux falls below or rises above configured thresholds.
 - **Compatibility:** Works with any camera integrated into Home Assistant, supporting both camera entities and direct image URLs.
 
 ## Configuration 
@@ -17,6 +18,8 @@
 - **`entity_id`**: The camera entity from which to fetch images.
 - **`image_url`** *(optional)*: Direct HTTP URL pointing to an image file (e.g., JPEG, PNG).
 - **`update_interval`** *(optional)*: Seconds between updates. Default is 30 seconds.
+- **`unavailable_below`** *(optional)*: If the calculated lux is at or below this value, the sensor is marked unavailable until it rises.
+- **`unavailable_above`** *(optional)*: If the calculated lux is at or above this value, the sensor is marked unavailable until it falls.
 - **`brightness_roi`** *(optional)*: Defines a rectangular region within the image for focused brightness assessment.
   - **`x`**: The x-coordinate of the top-left corner of the ROI.
   - **`y`**: The y-coordinate of the top-left corner of the ROI.
