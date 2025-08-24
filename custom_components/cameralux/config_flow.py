@@ -123,14 +123,19 @@ class CameraLuxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if not errors:
                 roi_dict: dict = {CONF_ROI_ENABLED: roi_enabled_ui}
 
-                if CONF_X in user_input:
-                    roi_dict[CONF_X] = int_if_value(user_input.get(CONF_X))
-                if CONF_Y in user_input:
-                    roi_dict[CONF_Y] = int_if_value(user_input.get(CONF_Y))
-                if CONF_WIDTH in user_input:
-                    roi_dict[CONF_WIDTH] = int_if_value(user_input.get(CONF_WIDTH))
-                if CONF_HEIGHT in user_input:
-                    roi_dict[CONF_HEIGHT] = int_if_value(user_input.get(CONF_HEIGHT))
+                xv = int_if_value(user_input.get(CONF_X))
+                yv = int_if_value(user_input.get(CONF_Y))
+                wv = int_if_value(user_input.get(CONF_WIDTH))
+                hv = int_if_value(user_input.get(CONF_HEIGHT))
+
+                if xv is not None:
+                    roi_dict[CONF_X] = xv
+                if yv is not None:
+                    roi_dict[CONF_Y] = yv
+                if wv is not None:
+                    roi_dict[CONF_WIDTH] = wv
+                if hv is not None:
+                    roi_dict[CONF_HEIGHT] = hv
 
                 data = {
                     "name": name_def,
@@ -176,31 +181,61 @@ class CameraLuxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         fields[vol.Optional(CONF_UPDATE_INTERVAL, default=interval_def)] = (
             selector.selector({"number": {"min": 5, "step": 1, "mode": "box"}})
         )
-        fields[vol.Optional(CONF_UNAVAILABLE_BELOW)] = selector.selector(
-            {"number": {"min": 0, "mode": "box"}}
-        )
-        fields[vol.Optional(CONF_UNAVAILABLE_ABOVE)] = selector.selector(
-            {"number": {"min": 0, "mode": "box"}}
-        )
+        if unavail_below_def is not None:
+            fields[vol.Optional(CONF_UNAVAILABLE_BELOW, default=unavail_below_def)] = (
+                selector.selector({"number": {"min": 0, "mode": "box"}})
+            )
+        else:
+            fields[vol.Optional(CONF_UNAVAILABLE_BELOW)] = selector.selector(
+                {"number": {"min": 0, "mode": "box"}}
+            )
+        if unavail_above_def is not None:
+            fields[vol.Optional(CONF_UNAVAILABLE_ABOVE, default=unavail_above_def)] = (
+                selector.selector({"number": {"min": 0, "mode": "box"}})
+            )
+        else:
+            fields[vol.Optional(CONF_UNAVAILABLE_ABOVE)] = selector.selector(
+                {"number": {"min": 0, "mode": "box"}}
+            )
         fields[vol.Required(UI_ROI_ENABLED, default=roi_enabled_ui)] = (
             selector.selector({"boolean": {}})
         )
 
-        fields[vol.Optional(CONF_X)] = selector.selector(
-            {"number": {"min": 0, "mode": "box"}}
-        )
+        if x_def is not None:
+            fields[vol.Optional(CONF_X, default=x_def)] = selector.selector(
+                {"number": {"min": 0, "mode": "box"}}
+            )
+        else:
+            fields[vol.Optional(CONF_X)] = selector.selector(
+                {"number": {"min": 0, "mode": "box"}}
+            )
 
-        fields[vol.Optional(CONF_Y)] = selector.selector(
-            {"number": {"min": 0, "mode": "box"}}
-        )
+        if y_def is not None:
+            fields[vol.Optional(CONF_Y, default=y_def)] = selector.selector(
+                {"number": {"min": 0, "mode": "box"}}
+            )
+        else:
+            fields[vol.Optional(CONF_Y)] = selector.selector(
+                {"number": {"min": 0, "mode": "box"}}
+            )
 
-        fields[vol.Optional(CONF_WIDTH)] = selector.selector(
-            {"number": {"min": 0, "mode": "box"}}
-        )
+        if w_def is not None:
+            fields[vol.Optional(CONF_WIDTH, default=w_def)] = selector.selector(
+                {"number": {"min": 0, "mode": "box"}}
+            )
+        else:
+            fields[vol.Optional(CONF_WIDTH)] = selector.selector(
+                {"number": {"min": 0, "mode": "box"}}
+            )
 
-        fields[vol.Optional(CONF_HEIGHT)] = selector.selector(
-            {"number": {"min": 0, "mode": "box"}}
-        )
+        if h_def is not None:
+            fields[vol.Optional(CONF_HEIGHT, default=h_def)] = selector.selector(
+                {"number": {"min": 0, "mode": "box"}}
+            )
+        else:
+            fields[vol.Optional(CONF_HEIGHT)] = selector.selector(
+                {"number": {"min": 0, "mode": "box"}}
+            )
 
         return self.async_show_form(
             step_id="user", data_schema=vol.Schema(fields), errors=errors
@@ -223,13 +258,21 @@ class CameraLuxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         roi: dict = {CONF_ROI_ENABLED: bool(roi_yaml.get(CONF_ROI_ENABLED, False))}
 
         if CONF_X in roi_yaml:
-            roi[CONF_X] = int_if_value(roi_yaml.get(CONF_X))
+            xv = int_if_value(roi_yaml.get(CONF_X))
+            if xv is not None:
+                roi[CONF_X] = xv
         if CONF_Y in roi_yaml:
-            roi[CONF_Y] = int_if_value(roi_yaml.get(CONF_Y))
+            yv = int_if_value(roi_yaml.get(CONF_Y))
+            if yv is not None:
+                roi[CONF_Y] = yv
         if CONF_WIDTH in roi_yaml:
-            roi[CONF_WIDTH] = int_if_value(roi_yaml.get(CONF_WIDTH))
+            wv = int_if_value(roi_yaml.get(CONF_WIDTH))
+            if wv is not None:
+                roi[CONF_WIDTH] = wv
         if CONF_HEIGHT in roi_yaml:
-            roi[CONF_HEIGHT] = int_if_value(roi_yaml.get(CONF_HEIGHT))
+            hv = int_if_value(roi_yaml.get(CONF_HEIGHT))
+            if hv is not None:
+                roi[CONF_HEIGHT] = hv
 
         data = {
             "name": name,
@@ -307,22 +350,19 @@ class CameraLuxOptionsFlow(config_entries.OptionsFlow):
 
             roi_new: dict = {CONF_ROI_ENABLED: roi_enabled_in}
 
-            if CONF_X in user_input:
-                x_val = int_if_value(user_input.get(CONF_X))
-                if x_val is not None:
-                    roi_new[CONF_X] = x_val
-            if CONF_Y in user_input:
-                y_val = int_if_value(user_input.get(CONF_Y))
-                if y_val is not None:
-                    roi_new[CONF_Y] = y_val
-            if CONF_WIDTH in user_input:
-                w_val = int_if_value(user_input.get(CONF_WIDTH))
-                if w_val is not None:
-                    roi_new[CONF_WIDTH] = w_val
-            if CONF_HEIGHT in user_input:
-                h_val = int_if_value(user_input.get(CONF_HEIGHT))
-                if h_val is not None:
-                    roi_new[CONF_HEIGHT] = h_val
+            xv = int_if_value(user_input.get(CONF_X))
+            yv = int_if_value(user_input.get(CONF_Y))
+            wv = int_if_value(user_input.get(CONF_WIDTH))
+            hv = int_if_value(user_input.get(CONF_HEIGHT))
+
+            if xv is not None:
+                roi_new[CONF_X] = xv
+            if yv is not None:
+                roi_new[CONF_Y] = yv
+            if wv is not None:
+                roi_new[CONF_WIDTH] = wv
+            if hv is not None:
+                roi_new[CONF_HEIGHT] = hv
 
             if source == SOURCE_CAMERA and not entity_in:
                 errors[CONF_ENTITY_ID] = "required"
@@ -332,22 +372,14 @@ class CameraLuxOptionsFlow(config_entries.OptionsFlow):
             if not errors:
                 new_opts = {
                     CONF_SOURCE: source,
+                    CONF_ENTITY_ID: entity_in if source == SOURCE_CAMERA else None,
+                    CONF_IMAGE_URL: url_in if source == SOURCE_URL else None,
                     CONF_CALIBRATION_FACTOR: float(cal_in),
                     CONF_UPDATE_INTERVAL: int(interval_in),
                     CONF_BRIGHTNESS_ROI: roi_new,
+                    CONF_UNAVAILABLE_BELOW: unavail_below_in,
+                    CONF_UNAVAILABLE_ABOVE: unavail_above_in,
                 }
-                if source == SOURCE_CAMERA and entity_in is not None:
-                    new_opts[CONF_ENTITY_ID] = entity_in
-                if source == SOURCE_URL and url_in:
-                    new_opts[CONF_IMAGE_URL] = url_in
-                if unavail_below_in is not None:
-                    new_opts[CONF_UNAVAILABLE_BELOW] = unavail_below_in
-                elif data.get(CONF_UNAVAILABLE_BELOW) == 0:
-                    new_opts[CONF_UNAVAILABLE_BELOW] = 0
-                if unavail_above_in is not None:
-                    new_opts[CONF_UNAVAILABLE_ABOVE] = unavail_above_in
-                elif data.get(CONF_UNAVAILABLE_ABOVE) == 0:
-                    new_opts[CONF_UNAVAILABLE_ABOVE] = 0
                 return self.async_create_entry(title="", data=new_opts)
 
             source_def = source
@@ -392,32 +424,62 @@ class CameraLuxOptionsFlow(config_entries.OptionsFlow):
             selector.selector({"number": {"min": 5, "step": 1, "mode": "box"}})
         )
 
-        fields[vol.Optional(CONF_UNAVAILABLE_BELOW)] = selector.selector(
-            {"number": {"min": 0, "mode": "box"}}
-        )
-        fields[vol.Optional(CONF_UNAVAILABLE_ABOVE)] = selector.selector(
-            {"number": {"min": 0, "mode": "box"}}
-        )
+        if unavail_below_def is not None:
+            fields[vol.Optional(CONF_UNAVAILABLE_BELOW, default=unavail_below_def)] = (
+                selector.selector({"number": {"min": 0, "mode": "box"}})
+            )
+        else:
+            fields[vol.Optional(CONF_UNAVAILABLE_BELOW)] = selector.selector(
+                {"number": {"min": 0, "mode": "box"}}
+            )
+        if unavail_above_def is not None:
+            fields[vol.Optional(CONF_UNAVAILABLE_ABOVE, default=unavail_above_def)] = (
+                selector.selector({"number": {"min": 0, "mode": "box"}})
+            )
+        else:
+            fields[vol.Optional(CONF_UNAVAILABLE_ABOVE)] = selector.selector(
+                {"number": {"min": 0, "mode": "box"}}
+            )
 
         fields[vol.Required(UI_ROI_ENABLED, default=roi_enabled_def)] = (
             selector.selector({"boolean": {}})
         )
 
-        fields[vol.Optional(CONF_X)] = selector.selector(
-            {"number": {"min": 0, "mode": "box"}}
-        )
+        if x_def is not None:
+            fields[vol.Optional(CONF_X, default=x_def)] = selector.selector(
+                {"number": {"min": 0, "mode": "box"}}
+            )
+        else:
+            fields[vol.Optional(CONF_X)] = selector.selector(
+                {"number": {"min": 0, "mode": "box"}}
+            )
 
-        fields[vol.Optional(CONF_Y)] = selector.selector(
-            {"number": {"min": 0, "mode": "box"}}
-        )
+        if y_def is not None:
+            fields[vol.Optional(CONF_Y, default=y_def)] = selector.selector(
+                {"number": {"min": 0, "mode": "box"}}
+            )
+        else:
+            fields[vol.Optional(CONF_Y)] = selector.selector(
+                {"number": {"min": 0, "mode": "box"}}
+            )
 
-        fields[vol.Optional(CONF_WIDTH)] = selector.selector(
-            {"number": {"min": 0, "mode": "box"}}
-        )
+        if w_def is not None:
+            fields[vol.Optional(CONF_WIDTH, default=w_def)] = selector.selector(
+                {"number": {"min": 0, "mode": "box"}}
+            )
+        else:
+            fields[vol.Optional(CONF_WIDTH)] = selector.selector(
+                {"number": {"min": 0, "mode": "box"}}
+            )
 
-        fields[vol.Optional(CONF_HEIGHT)] = selector.selector(
-            {"number": {"min": 0, "mode": "box"}}
-        )
+        if h_def is not None:
+            fields[vol.Optional(CONF_HEIGHT, default=h_def)] = selector.selector(
+                {"number": {"min": 0, "mode": "box"}}
+            )
+        else:
+            fields[vol.Optional(CONF_HEIGHT)] = selector.selector(
+                {"number": {"min": 0, "mode": "box"}}
+            )
 
         return self.async_show_form(
             step_id="edit", data_schema=vol.Schema(fields), errors=errors
