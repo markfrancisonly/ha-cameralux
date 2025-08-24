@@ -19,9 +19,11 @@ jobs:
           version="${{ github.event.release.tag_name }}"
           version="${version,,}"
           version="${version#v}"
-          yq e -P -o=json \
-            -i ".version = \"${version}\"" \
-            "${{ github.workspace }}/custom_components/cameralux/manifest.json"
+          jq --arg version "$version" '.version=$version' \
+            "${{ github.workspace }}/custom_components/cameralux/manifest.json" \
+            > "${{ github.workspace }}/custom_components/cameralux/manifest.json.tmp"
+          mv "${{ github.workspace }}/custom_components/cameralux/manifest.json.tmp" \
+             "${{ github.workspace }}/custom_components/cameralux/manifest.json"
 
       - name: 📦 Created zipped release package
         run: |
