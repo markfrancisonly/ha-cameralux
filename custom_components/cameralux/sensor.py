@@ -176,17 +176,17 @@ async def async_setup_entry(
         )
         image_url = None
 
-        cfg = {
-            CONF_ENTITY_ID: camera_entity,
-            CONF_IMAGE_URL: image_url,
-            CONF_BRIGHTNESS_ROI: data.get(CONF_BRIGHTNESS_ROI, {}),
-            CONF_CALIBRATION_FACTOR: data.get(
-                CONF_CALIBRATION_FACTOR, DEFAULT_CALIBRATION_FACTOR
-            ),
-            CONF_UPDATE_INTERVAL: data.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
-            CONF_UNAVAILABLE_BELOW: data.get(CONF_UNAVAILABLE_BELOW),
-            CONF_UNAVAILABLE_ABOVE: data.get(CONF_UNAVAILABLE_ABOVE),
-        }
+    cfg = {
+        CONF_ENTITY_ID: camera_entity,
+        CONF_IMAGE_URL: image_url,
+        CONF_BRIGHTNESS_ROI: data.get(CONF_BRIGHTNESS_ROI, {}),
+        CONF_CALIBRATION_FACTOR: data.get(
+            CONF_CALIBRATION_FACTOR, DEFAULT_CALIBRATION_FACTOR
+        ),
+        CONF_UPDATE_INTERVAL: data.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
+        CONF_UNAVAILABLE_BELOW: data.get(CONF_UNAVAILABLE_BELOW),
+        CONF_UNAVAILABLE_ABOVE: data.get(CONF_UNAVAILABLE_ABOVE),
+    }
 
     # Use entry.entry_id as the stable unique_id so Options edits never change the entity id.
     async_add_entities(
