@@ -6,6 +6,7 @@ unit-tested in isolation.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import math
 from typing import Dict, Optional, Tuple
@@ -22,6 +23,32 @@ try:
     RESAMPLE = Image.Resampling.LANCZOS  # Pillow >= 9.1
 except Exception:  # noqa: BLE001
     RESAMPLE = Image.LANCZOS
+
+
+def build_unique_id(
+    name: str, camera_entity_id: str | None, image_url: str | None
+) -> str:
+    """Unique ID base (camera/url) + short hash of name to allow multiple sensors per camera."""
+    suffix = hashlib.md5((name or "unnamed").encode()).hexdigest()[:8]
+    if camera_entity_id:
+        base = f"cameralux_{camera_entity_id.replace('.', '_')}"
+    elif image_url:
+        base = f"cameralux_url_{hashlib.md5(image_url.encode()).hexdigest()}"
+    else:
+        base = "cameralux_manual"
+    return f"{base}_{suffix}"
+
+
+def int_if_value(value) -> int | None:
+    """Return int(value) if it is a real value (not None/empty string); otherwise None."""
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip() == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def get_bounded_int(
@@ -155,5 +182,7 @@ def calculate_image_luminance(image: Image.Image) -> Tuple[float, float]:
 
     avg_lum = float(np.mean(y_plane))
     perceived = float(np.log1p(avg_lum))
-    _LOGGER.debug("luminance avg=%f perceived=%f from %s", avg_lum, perceived, image.mode)
+    _LOGGER.debug(
+        "luminance avg=%f perceived=%f from %s", avg_lum, perceived, image.mode
+    )
     return avg_lum, perceived

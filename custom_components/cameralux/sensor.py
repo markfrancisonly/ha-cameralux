@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import io
 import logging
 from datetime import datetime, timedelta
@@ -45,8 +44,8 @@ from .const import (
     CONF_ROI_ENABLED,
     CONF_SENSORS,
     CONF_SOURCE,
-    CONF_UNAVAILABLE_BELOW,
     CONF_UNAVAILABLE_ABOVE,
+    CONF_UNAVAILABLE_BELOW,
     CONF_UPDATE_INTERVAL,
     CONF_WIDTH,
     CONF_X,
@@ -59,8 +58,8 @@ from .const import (
     SOURCE_URL,
     SUGGESTED_DISPLAY_PRECISION,
 )
-
 from .helpers import (
+    build_unique_id,
     calculate_image_luminance,
     coerce_float,
     crop_image,
@@ -69,21 +68,6 @@ from .helpers import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def build_unique_id(
-    camera_entity_id: str | None, image_url: str | None, sensor_name: str
-) -> str | None:
-    """Construct a unique_id from source info and a hash of the name."""
-    name_tag = hashlib.md5(sensor_name.encode()).hexdigest()[:8]
-    if camera_entity_id:
-        base = f"cameralux_{camera_entity_id.replace('.', '_')}"
-        return f"{base}_{name_tag}"
-    if image_url:
-        url_hash = hashlib.md5(image_url.encode()).hexdigest()
-        base = f"cameralux_url_{url_hash}"
-        return f"{base}_{name_tag}"
-    return None
 
 
 # YAML schemas (kept for import support)
@@ -278,9 +262,9 @@ class CameraLuxSensor(SensorEntity):
             )
 
         self._attr_unique_id = stable_unique_id or build_unique_id(
+            name=name,
             camera_entity_id=self.camera_entity_id,
             image_url=self.image_url,
-            sensor_name=name,
         )
 
         if self.camera_entity_id:
@@ -387,8 +371,11 @@ class CameraLuxSensor(SensorEntity):
                     self.perceived_luminance * self.luminance_to_lux_calibration_factor
                 )
                 if (
-                    (self.unavailable_below is not None and self.lux <= self.unavailable_below)
-                    or (self.unavailable_above is not None and self.lux >= self.unavailable_above)
+                    self.unavailable_below is not None
+                    and self.lux < self.unavailable_below
+                ) or (
+                    self.unavailable_above is not None
+                    and self.lux > self.unavailable_above
                 ):
                     _LOGGER.debug(
                         "%s lux %s hit unavailable threshold; setting unavailable",
@@ -492,4 +479,3 @@ class CameraLuxSensor(SensorEntity):
         except (UnidentifiedImageError, OSError, ValueError) as e:
             _LOGGER.error("Invalid image content from URL '%s': %s", url, e)
             return None
-

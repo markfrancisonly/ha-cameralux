@@ -13,25 +13,26 @@
 - **Unavailable Lux Thresholds:** Optionally mark the sensor unavailable when lux falls below or rises above configured thresholds.
 - **Compatibility:** Works with any camera integrated into Home Assistant, supporting both camera entities and direct image URLs.
 
-## Configuration 
+## Configuration
 
 - **`entity_id`**: The camera entity from which to fetch images.
-- **`image_url`** *(optional)*: Direct HTTP URL pointing to an image file (e.g., JPEG, PNG).
-- **`update_interval`** *(optional)*: Seconds between updates. Default is 30 seconds.
-- **`unavailable_below`** *(optional)*: If the calculated lux is at or below this value, the sensor is marked unavailable until it rises.
-- **`unavailable_above`** *(optional)*: If the calculated lux is at or above this value, the sensor is marked unavailable until it falls.
-- **`brightness_roi`** *(optional)*: Defines a rectangular region within the image for focused brightness assessment.
+- **`image_url`** _(optional)_: Direct HTTP URL pointing to an image file (e.g., JPEG, PNG).
+- **`update_interval`** _(optional)_: Seconds between updates. Default is 30 seconds.
+- **`unavailable_below`** _(optional)_: If the calculated lux is below this value, the sensor is marked unavailable until it rises.
+- **`unavailable_above`** _(optional)_: If the calculated lux is above this value, the sensor is marked unavailable until it falls.
+- **`brightness_roi`** _(optional)_: Defines a rectangular region within the image for focused brightness assessment.
   - **`x`**: The x-coordinate of the top-left corner of the ROI.
   - **`y`**: The y-coordinate of the top-left corner of the ROI.
   - **`width`**: The width of the ROI.
   - **`height`**: The height of the ROI.
-- **`calibration_factor`** *(optional)*: A float value to calibrate the perceived luminance to lux. Defaults to 2000 if not specified.
+- **`calibration_factor`** _(optional)_: A float value to calibrate the perceived luminance to lux. Defaults to 2000 if not specified.
 
 **Note:** Each sensor must have either `entity_id` or `image_url` configured, but not both.
- 
+
 ## Installation
 
 1. **Using HACS (Recommended):**
+
    - Open Home Assistant.
    - Navigate to **HACS > Integrations**.
    - Click on the **"+"** button.
@@ -41,5 +42,3 @@
    - Download the `cameralux` repository from [GitHub](https://github.com/markfrancisonly/ha-cameralux).
    - Place the `cameralux` folder inside your `custom_components` directory.
    - Restart Home Assistant.
-
-

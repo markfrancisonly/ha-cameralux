@@ -1,7 +1,7 @@
 # custom_components/cameralux/config_flow.py
 from __future__ import annotations
 
-import hashlib
+import logging
 
 import voluptuous as vol
 from homeassistant import config_entries
@@ -16,8 +16,8 @@ from .const import (
     CONF_IMAGE_URL,
     CONF_ROI_ENABLED,
     CONF_SOURCE,
-    CONF_UNAVAILABLE_BELOW,
     CONF_UNAVAILABLE_ABOVE,
+    CONF_UNAVAILABLE_BELOW,
     CONF_UPDATE_INTERVAL,
     CONF_WIDTH,
     CONF_X,
@@ -27,45 +27,14 @@ from .const import (
     SOURCE_URL,
 )
 
+_LOGGER = logging.getLogger(__name__)
 UI_ROI_ENABLED = "roi_enabled"  # UI-only toggle name
 
-
-def build_entry_unique_id(
-    name: str, camera_entity_id: str | None, image_url: str | None
-) -> str:
-    """Unique ID base (camera/url) + short hash of name to allow multiple sensors per camera."""
-    suffix = hashlib.md5((name or "unnamed").encode()).hexdigest()[:8]
-    if camera_entity_id:
-        base = f"cameralux_{camera_entity_id.replace('.', '_')}"
-    elif image_url:
-        base = f"cameralux_url_{hashlib.md5(image_url.encode()).hexdigest()}"
-    else:
-        base = "cameralux_manual"
-    return f"{base}_{suffix}"
+from .helpers import build_unique_id, int_if_value
 
 
-def int_if_value(value) -> int | None:
-    """Return int(value) if it is a real value (not None/empty string); otherwise None."""
-    if value is None:
-        return None
-    if isinstance(value, str) and value.strip() == "":
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def float_if_value(value) -> float | None:
-    """Return float(value) if it is a real value; otherwise None."""
-    if value is None:
-        return None
-    if isinstance(value, str) and value.strip() == "":
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
+def nullable(sel):
+    return vol.Any(None, sel)
 
 
 class CameraLuxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -77,224 +46,127 @@ class CameraLuxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Initial setup: choose Source, set camera/url, optional ROI, calibration, interval."""
         errors: dict[str, str] = {}
 
-        name_def = ""
-        source_def = SOURCE_CAMERA
-        entity_id_def: str | None = None
-        image_url_def = ""
-        cal_def = 2000
-        interval_def = 30
-        unavail_below_def = None
-        unavail_above_def = None
-        roi_enabled_ui = False
-
-        x_def = y_def = w_def = h_def = None
+        # Defaults only for required/always-present fields; avoid default=None for optional.
+        defaults = {
+            "name": "",
+            CONF_SOURCE: SOURCE_CAMERA,
+            CONF_IMAGE_URL: "",
+            CONF_CALIBRATION_FACTOR: 2000,
+            CONF_UPDATE_INTERVAL: 30,
+            UI_ROI_ENABLED: False,
+        }
 
         if user_input is not None:
-            name_def = (user_input.get("name") or "").strip()
-            source_def = user_input.get(CONF_SOURCE, SOURCE_CAMERA)
-            entity_id_def = user_input.get(CONF_ENTITY_ID)
-            image_url_def = (user_input.get(CONF_IMAGE_URL) or "").strip()
-            cal_def = int(user_input.get(CONF_CALIBRATION_FACTOR, 2000))
-            interval_def = int(user_input.get(CONF_UPDATE_INTERVAL, 30))
-            unavail_below_def = float_if_value(
-                user_input.get(CONF_UNAVAILABLE_BELOW)
-            )
-            unavail_above_def = float_if_value(
-                user_input.get(CONF_UNAVAILABLE_ABOVE)
-            )
-            roi_enabled_ui = bool(user_input.get(UI_ROI_ENABLED, False))
+            _LOGGER.debug("Received user input: %s", user_input)
+            try:
+                name = (user_input.get("name") or "").strip()
+                source = user_input.get(CONF_SOURCE, SOURCE_CAMERA)
+                entity_id = user_input.get(CONF_ENTITY_ID)
+                image_url = (user_input.get(CONF_IMAGE_URL) or "").strip()
+                calibration = int(user_input.get(CONF_CALIBRATION_FACTOR, 2000))
+                interval = int(user_input.get(CONF_UPDATE_INTERVAL, 30))
+                unavail_below = int_if_value(user_input.get(CONF_UNAVAILABLE_BELOW))
+                unavail_above = int_if_value(user_input.get(CONF_UNAVAILABLE_ABOVE))
+                roi_enabled = bool(user_input.get(UI_ROI_ENABLED, False))
+                roi_x = int_if_value(user_input.get(CONF_X))
+                roi_y = int_if_value(user_input.get(CONF_Y))
+                roi_width = int_if_value(user_input.get(CONF_WIDTH))
+                roi_height = int_if_value(user_input.get(CONF_HEIGHT))
 
-            if CONF_X in user_input:
-                x_def = int_if_value(user_input[CONF_X])
-            if CONF_Y in user_input:
-                y_def = int_if_value(user_input[CONF_Y])
-            if CONF_WIDTH in user_input:
-                w_def = int_if_value(user_input[CONF_WIDTH])
-            if CONF_HEIGHT in user_input:
-                h_def = int_if_value(user_input[CONF_HEIGHT])
+                # Validate requireds
+                if not name:
+                    errors["name"] = "required"
+                if source == SOURCE_CAMERA and not entity_id:
+                    errors[CONF_ENTITY_ID] = "required"
+                if source == SOURCE_URL and not image_url:
+                    errors[CONF_IMAGE_URL] = "required"
 
-            chosen_entity = entity_id_def if source_def == SOURCE_CAMERA else None
-            chosen_url = image_url_def if source_def == SOURCE_URL else None
-            if source_def == SOURCE_CAMERA and not chosen_entity:
-                errors[CONF_ENTITY_ID] = "required"
-            if source_def == SOURCE_URL and not chosen_url:
-                errors[CONF_IMAGE_URL] = "required"
+                if not errors:
+                    roi_dict = {CONF_ROI_ENABLED: roi_enabled}
+                    if roi_x is not None:
+                        roi_dict[CONF_X] = roi_x
+                    if roi_y is not None:
+                        roi_dict[CONF_Y] = roi_y
+                    if roi_width is not None:
+                        roi_dict[CONF_WIDTH] = roi_width
+                    if roi_height is not None:
+                        roi_dict[CONF_HEIGHT] = roi_height
 
-            if not errors:
-                roi_dict: dict = {CONF_ROI_ENABLED: roi_enabled_ui}
+                    data = {
+                        "name": name,
+                        CONF_ENTITY_ID: entity_id if source == SOURCE_CAMERA else None,
+                        CONF_IMAGE_URL: image_url if source == SOURCE_URL else None,
+                        CONF_BRIGHTNESS_ROI: roi_dict,
+                        CONF_CALIBRATION_FACTOR: float(calibration),
+                        CONF_UPDATE_INTERVAL: int(interval),
+                        CONF_UNAVAILABLE_BELOW: unavail_below,
+                        CONF_UNAVAILABLE_ABOVE: unavail_above,
+                        # saving source is optional for your logic, but harmless and clearer:
+                        CONF_SOURCE: source,
+                    }
 
-                xv = int_if_value(user_input.get(CONF_X))
-                yv = int_if_value(user_input.get(CONF_Y))
-                wv = int_if_value(user_input.get(CONF_WIDTH))
-                hv = int_if_value(user_input.get(CONF_HEIGHT))
+                    unique_id = build_unique_id(name, entity_id, image_url)
+                    await self.async_set_unique_id(unique_id)
+                    self._abort_if_unique_id_configured()
+                    _LOGGER.debug("Creating config entry with data: %s", data)
+                    return self.async_create_entry(title=name, data=data)
 
-                if xv is not None:
-                    roi_dict[CONF_X] = xv
-                if yv is not None:
-                    roi_dict[CONF_Y] = yv
-                if wv is not None:
-                    roi_dict[CONF_WIDTH] = wv
-                if hv is not None:
-                    roi_dict[CONF_HEIGHT] = hv
+            except ValueError as e:
+                _LOGGER.error("Invalid input: %s", e)
+                errors["base"] = "invalid_input"
 
-                data = {
-                    "name": name_def,
-                    CONF_ENTITY_ID: chosen_entity,
-                    CONF_IMAGE_URL: chosen_url or None,
-                    CONF_BRIGHTNESS_ROI: roi_dict,
-                    CONF_CALIBRATION_FACTOR: float(cal_def),
-                    CONF_UPDATE_INTERVAL: int(interval_def),
-                    CONF_UNAVAILABLE_BELOW: unavail_below_def,
-                    CONF_UNAVAILABLE_ABOVE: unavail_above_def,
+        # ---- Build form schema (nullable selectors for optionals; no default=None) ----
+        fields = {
+            vol.Required("name", default=defaults["name"]): str,
+            vol.Required(CONF_SOURCE, default=defaults[CONF_SOURCE]): selector.selector(
+                {
+                    "select": {
+                        "options": [
+                            {"label": "Camera entity", "value": SOURCE_CAMERA},
+                            {"label": "Image URL", "value": SOURCE_URL},
+                        ],
+                        "mode": "dropdown",
+                    }
                 }
-                unique_id = build_entry_unique_id(name_def, chosen_entity, chosen_url)
-                await self.async_set_unique_id(unique_id)
-                self._abort_if_unique_id_configured()
-                return self.async_create_entry(title=name_def, data=data)
-
-        if isinstance(entity_id_def, str) and entity_id_def:
-            entity_field = vol.Optional(CONF_ENTITY_ID, default=entity_id_def)
-        else:
-            entity_field = vol.Optional(CONF_ENTITY_ID)
-
-        fields: dict = {}
-        fields[vol.Required("name", default=name_def)] = str
-        fields[vol.Required(CONF_SOURCE, default=source_def)] = selector.selector(
-            {
-                "select": {
-                    "options": [
-                        {"label": "Camera entity", "value": SOURCE_CAMERA},
-                        {"label": "Image URL", "value": SOURCE_URL},
-                    ],
-                    "mode": "dropdown",
-                }
-            }
-        )
-        fields[entity_field] = selector.selector({"entity": {"domain": "camera"}})
-        fields[vol.Optional(CONF_IMAGE_URL, default=image_url_def)] = selector.selector(
-            {"text": {}}
-        )
-
-        fields[vol.Optional(CONF_CALIBRATION_FACTOR, default=cal_def)] = (
-            selector.selector({"number": {"min": 1, "step": 1, "mode": "box"}})
-        )
-        fields[vol.Optional(CONF_UPDATE_INTERVAL, default=interval_def)] = (
-            selector.selector({"number": {"min": 5, "step": 1, "mode": "box"}})
-        )
-        if unavail_below_def is not None:
-            fields[vol.Optional(CONF_UNAVAILABLE_BELOW, default=unavail_below_def)] = (
+            ),
+            vol.Optional(CONF_ENTITY_ID): nullable(
+                selector.selector({"entity": {"domain": "camera"}})
+            ),
+            vol.Optional(
+                CONF_IMAGE_URL, default=defaults[CONF_IMAGE_URL]
+            ): selector.selector({"text": {}}),
+            vol.Required(
+                CONF_CALIBRATION_FACTOR, default=defaults[CONF_CALIBRATION_FACTOR]
+            ): selector.selector({"number": {"min": 1, "step": 1, "mode": "box"}}),
+            vol.Required(
+                CONF_UPDATE_INTERVAL, default=defaults[CONF_UPDATE_INTERVAL]
+            ): selector.selector({"number": {"min": 5, "step": 1, "mode": "box"}}),
+            vol.Optional(CONF_UNAVAILABLE_BELOW): nullable(
                 selector.selector({"number": {"min": 0, "mode": "box"}})
-            )
-        else:
-            fields[vol.Optional(CONF_UNAVAILABLE_BELOW)] = selector.selector(
-                {"number": {"min": 0, "mode": "box"}}
-            )
-        if unavail_above_def is not None:
-            fields[vol.Optional(CONF_UNAVAILABLE_ABOVE, default=unavail_above_def)] = (
+            ),
+            vol.Optional(CONF_UNAVAILABLE_ABOVE): nullable(
                 selector.selector({"number": {"min": 0, "mode": "box"}})
-            )
-        else:
-            fields[vol.Optional(CONF_UNAVAILABLE_ABOVE)] = selector.selector(
-                {"number": {"min": 0, "mode": "box"}}
-            )
-        fields[vol.Required(UI_ROI_ENABLED, default=roi_enabled_ui)] = (
-            selector.selector({"boolean": {}})
-        )
-
-        if x_def is not None:
-            fields[vol.Optional(CONF_X, default=x_def)] = selector.selector(
-                {"number": {"min": 0, "mode": "box"}}
-            )
-        else:
-            fields[vol.Optional(CONF_X)] = selector.selector(
-                {"number": {"min": 0, "mode": "box"}}
-            )
-
-        if y_def is not None:
-            fields[vol.Optional(CONF_Y, default=y_def)] = selector.selector(
-                {"number": {"min": 0, "mode": "box"}}
-            )
-        else:
-            fields[vol.Optional(CONF_Y)] = selector.selector(
-                {"number": {"min": 0, "mode": "box"}}
-            )
-
-        if w_def is not None:
-            fields[vol.Optional(CONF_WIDTH, default=w_def)] = selector.selector(
-                {"number": {"min": 0, "mode": "box"}}
-            )
-        else:
-            fields[vol.Optional(CONF_WIDTH)] = selector.selector(
-                {"number": {"min": 0, "mode": "box"}}
-            )
-
-        if h_def is not None:
-            fields[vol.Optional(CONF_HEIGHT, default=h_def)] = selector.selector(
-                {"number": {"min": 0, "mode": "box"}}
-            )
-        else:
-            fields[vol.Optional(CONF_HEIGHT)] = selector.selector(
-                {"number": {"min": 0, "mode": "box"}}
-            )
+            ),
+            vol.Required(
+                UI_ROI_ENABLED, default=defaults[UI_ROI_ENABLED]
+            ): selector.selector({"boolean": {}}),
+            vol.Optional(CONF_X): nullable(
+                selector.selector({"number": {"min": 0, "mode": "box"}})
+            ),
+            vol.Optional(CONF_Y): nullable(
+                selector.selector({"number": {"min": 0, "mode": "box"}})
+            ),
+            vol.Optional(CONF_WIDTH): nullable(
+                selector.selector({"number": {"min": 0, "mode": "box"}})
+            ),
+            vol.Optional(CONF_HEIGHT): nullable(
+                selector.selector({"number": {"min": 0, "mode": "box"}})
+            ),
+        }
 
         return self.async_show_form(
             step_id="user", data_schema=vol.Schema(fields), errors=errors
         )
-
-    async def async_step_import(self, import_config: dict):
-        """YAML → UI import. Prefer camera if both present; store ROI with 'enabled'. Do not inject zeros."""
-        name = (import_config.get("name") or "").strip()
-        entity_id = import_config.get(CONF_ENTITY_ID)
-        image_url = (import_config.get(CONF_IMAGE_URL) or "").strip() or None
-
-        if entity_id:
-            chosen_entity, chosen_url = entity_id, None
-        elif image_url:
-            chosen_entity, chosen_url = None, image_url
-        else:
-            return self.async_abort(reason="need_source")
-
-        roi_yaml = import_config.get(CONF_BRIGHTNESS_ROI) or {}
-        roi: dict = {CONF_ROI_ENABLED: bool(roi_yaml.get(CONF_ROI_ENABLED, False))}
-
-        if CONF_X in roi_yaml:
-            xv = int_if_value(roi_yaml.get(CONF_X))
-            if xv is not None:
-                roi[CONF_X] = xv
-        if CONF_Y in roi_yaml:
-            yv = int_if_value(roi_yaml.get(CONF_Y))
-            if yv is not None:
-                roi[CONF_Y] = yv
-        if CONF_WIDTH in roi_yaml:
-            wv = int_if_value(roi_yaml.get(CONF_WIDTH))
-            if wv is not None:
-                roi[CONF_WIDTH] = wv
-        if CONF_HEIGHT in roi_yaml:
-            hv = int_if_value(roi_yaml.get(CONF_HEIGHT))
-            if hv is not None:
-                roi[CONF_HEIGHT] = hv
-
-        data = {
-            "name": name,
-            CONF_ENTITY_ID: chosen_entity,
-            CONF_IMAGE_URL: chosen_url,
-            CONF_BRIGHTNESS_ROI: roi,
-            CONF_CALIBRATION_FACTOR: float(
-                import_config.get(CONF_CALIBRATION_FACTOR, 2000.0)
-            ),
-            CONF_UPDATE_INTERVAL: int(import_config.get(CONF_UPDATE_INTERVAL, 30)),
-            CONF_UNAVAILABLE_BELOW: float_if_value(
-                import_config.get(CONF_UNAVAILABLE_BELOW)
-            ),
-            CONF_UNAVAILABLE_ABOVE: float_if_value(
-                import_config.get(CONF_UNAVAILABLE_ABOVE)
-            ),
-        }
-
-        unique_id = build_entry_unique_id(name, chosen_entity, chosen_url)
-        await self.async_set_unique_id(unique_id)
-        self._abort_if_unique_id_configured()
-        return self.async_create_entry(title=name, data=data)
 
     @staticmethod
     @callback
@@ -324,8 +196,8 @@ class CameraLuxOptionsFlow(config_entries.OptionsFlow):
         url_def = data.get(CONF_IMAGE_URL) or ""
         cal_def = int(data.get(CONF_CALIBRATION_FACTOR, 2000))
         interval_def = int(data.get(CONF_UPDATE_INTERVAL, 30))
-        unavail_below_def = float_if_value(data.get(CONF_UNAVAILABLE_BELOW))
-        unavail_above_def = float_if_value(data.get(CONF_UNAVAILABLE_ABOVE))
+        unavail_below_def = data.get(CONF_UNAVAILABLE_BELOW)
+        unavail_above_def = data.get(CONF_UNAVAILABLE_ABOVE)
 
         roi = data.get(CONF_BRIGHTNESS_ROI) or {}
         roi_enabled_def = bool(roi.get(CONF_ROI_ENABLED, False))
@@ -340,21 +212,15 @@ class CameraLuxOptionsFlow(config_entries.OptionsFlow):
             url_in = (user_input.get(CONF_IMAGE_URL) or "").strip()
             cal_in = int(user_input.get(CONF_CALIBRATION_FACTOR, cal_def))
             interval_in = int(user_input.get(CONF_UPDATE_INTERVAL, interval_def))
-            unavail_below_in = float_if_value(
-                user_input.get(CONF_UNAVAILABLE_BELOW)
-            )
-            unavail_above_in = float_if_value(
-                user_input.get(CONF_UNAVAILABLE_ABOVE)
-            )
+            unavail_below_in = int_if_value(user_input.get(CONF_UNAVAILABLE_BELOW))
+            unavail_above_in = int_if_value(user_input.get(CONF_UNAVAILABLE_ABOVE))
             roi_enabled_in = bool(user_input.get(UI_ROI_ENABLED, roi_enabled_def))
 
             roi_new: dict = {CONF_ROI_ENABLED: roi_enabled_in}
-
             xv = int_if_value(user_input.get(CONF_X))
             yv = int_if_value(user_input.get(CONF_Y))
             wv = int_if_value(user_input.get(CONF_WIDTH))
             hv = int_if_value(user_input.get(CONF_HEIGHT))
-
             if xv is not None:
                 roi_new[CONF_X] = xv
             if yv is not None:
@@ -382,6 +248,7 @@ class CameraLuxOptionsFlow(config_entries.OptionsFlow):
                 }
                 return self.async_create_entry(title="", data=new_opts)
 
+            # keep user input in form after errors
             source_def = source
             entity_def = entity_in
             url_def = url_in
@@ -395,11 +262,7 @@ class CameraLuxOptionsFlow(config_entries.OptionsFlow):
             w_def = roi_new.get(CONF_WIDTH, w_def)
             h_def = roi_new.get(CONF_HEIGHT, h_def)
 
-        if isinstance(entity_def, str) and entity_def:
-            entity_field = vol.Optional(CONF_ENTITY_ID, default=entity_def)
-        else:
-            entity_field = vol.Optional(CONF_ENTITY_ID)
-
+        # ---- Build options form (nullable selectors for optionals) ----
         fields: dict = {}
         fields[vol.Required(CONF_SOURCE, default=source_def)] = selector.selector(
             {
@@ -412,7 +275,15 @@ class CameraLuxOptionsFlow(config_entries.OptionsFlow):
                 }
             }
         )
-        fields[entity_field] = selector.selector({"entity": {"domain": "camera"}})
+
+        if isinstance(entity_def, str) and entity_def:
+            entity_key = vol.Optional(CONF_ENTITY_ID, default=entity_def)
+        else:
+            entity_key = vol.Optional(CONF_ENTITY_ID)
+        fields[entity_key] = nullable(
+            selector.selector({"entity": {"domain": "camera"}})
+        )
+
         fields[vol.Optional(CONF_IMAGE_URL, default=url_def)] = selector.selector(
             {"text": {}}
         )
@@ -426,60 +297,40 @@ class CameraLuxOptionsFlow(config_entries.OptionsFlow):
 
         if unavail_below_def is not None:
             fields[vol.Optional(CONF_UNAVAILABLE_BELOW, default=unavail_below_def)] = (
-                selector.selector({"number": {"min": 0, "mode": "box"}})
+                nullable(selector.selector({"number": {"min": 0, "mode": "box"}}))
             )
         else:
-            fields[vol.Optional(CONF_UNAVAILABLE_BELOW)] = selector.selector(
-                {"number": {"min": 0, "mode": "box"}}
+            fields[vol.Optional(CONF_UNAVAILABLE_BELOW)] = nullable(
+                selector.selector({"number": {"min": 0, "mode": "box"}})
             )
+
         if unavail_above_def is not None:
             fields[vol.Optional(CONF_UNAVAILABLE_ABOVE, default=unavail_above_def)] = (
-                selector.selector({"number": {"min": 0, "mode": "box"}})
+                nullable(selector.selector({"number": {"min": 0, "mode": "box"}}))
             )
         else:
-            fields[vol.Optional(CONF_UNAVAILABLE_ABOVE)] = selector.selector(
-                {"number": {"min": 0, "mode": "box"}}
+            fields[vol.Optional(CONF_UNAVAILABLE_ABOVE)] = nullable(
+                selector.selector({"number": {"min": 0, "mode": "box"}})
             )
 
         fields[vol.Required(UI_ROI_ENABLED, default=roi_enabled_def)] = (
             selector.selector({"boolean": {}})
         )
 
-        if x_def is not None:
-            fields[vol.Optional(CONF_X, default=x_def)] = selector.selector(
-                {"number": {"min": 0, "mode": "box"}}
-            )
-        else:
-            fields[vol.Optional(CONF_X)] = selector.selector(
-                {"number": {"min": 0, "mode": "box"}}
-            )
+        def add_roi(key, val):
+            if val is not None:
+                fields[vol.Optional(key, default=val)] = nullable(
+                    selector.selector({"number": {"min": 0, "mode": "box"}})
+                )
+            else:
+                fields[vol.Optional(key)] = nullable(
+                    selector.selector({"number": {"min": 0, "mode": "box"}})
+                )
 
-        if y_def is not None:
-            fields[vol.Optional(CONF_Y, default=y_def)] = selector.selector(
-                {"number": {"min": 0, "mode": "box"}}
-            )
-        else:
-            fields[vol.Optional(CONF_Y)] = selector.selector(
-                {"number": {"min": 0, "mode": "box"}}
-            )
-
-        if w_def is not None:
-            fields[vol.Optional(CONF_WIDTH, default=w_def)] = selector.selector(
-                {"number": {"min": 0, "mode": "box"}}
-            )
-        else:
-            fields[vol.Optional(CONF_WIDTH)] = selector.selector(
-                {"number": {"min": 0, "mode": "box"}}
-            )
-
-        if h_def is not None:
-            fields[vol.Optional(CONF_HEIGHT, default=h_def)] = selector.selector(
-                {"number": {"min": 0, "mode": "box"}}
-            )
-        else:
-            fields[vol.Optional(CONF_HEIGHT)] = selector.selector(
-                {"number": {"min": 0, "mode": "box"}}
-            )
+        add_roi(CONF_X, x_def)
+        add_roi(CONF_Y, y_def)
+        add_roi(CONF_WIDTH, w_def)
+        add_roi(CONF_HEIGHT, h_def)
 
         return self.async_show_form(
             step_id="edit", data_schema=vol.Schema(fields), errors=errors

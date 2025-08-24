@@ -11,7 +11,7 @@ from .const import PLATFORMS
 
 
 async def async_setup(hass: "HomeAssistant", config: dict) -> bool:
-    # YAML -> UI import is handled in sensor.async_setup_platform (if you keep YAML)
+    # Explicitly ignore YAML configuration to prevent import flow
     return True
 
 
