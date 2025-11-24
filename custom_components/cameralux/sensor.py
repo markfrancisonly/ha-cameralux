@@ -19,7 +19,11 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.const import (
+    EVENT_HOMEASSISTANT_STARTED,
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
+)
 from homeassistant.core import CALLBACK_TYPE, CoreState, HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -285,7 +289,15 @@ class CameraLuxSensor(SensorEntity):
 
     @property
     def available(self) -> bool:
-        """Return True when a lux value has been computed."""
+        """Return True when a lux value has been computed and underlying source is available."""
+        if self.camera_entity_id:
+            cam_state = self.hass.states.get(self.camera_entity_id)
+            if cam_state is None or cam_state.state in (
+                STATE_UNAVAILABLE,
+                STATE_UNKNOWN,
+            ):
+                return False
+
         return self.lux is not None
 
     @property

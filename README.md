@@ -1,6 +1,6 @@
 # Camera Lux
 
-**Camera Lux** is a custom Home Assistant integration that utilizes camera feeds to estimate ambient light levels (lux) in your environment. By analyzing images from your cameras, `cameralux` provides virtual lux readings that can be used to automate lighting, monitor lighting conditions, and enhance your smart home setup.
+**Camera Lux** is a custom Home Assistant integration that utilizes a camera feed or direct image URL to estimate ambient light levels (lux) in your environment. By analyzing images from your cameras, `cameralux` provides virtual lux readings that can be used to automate lighting, monitor lighting conditions, and enhance your smart home setup.
 
 <img width="600"  alt="image" src="https://github.com/user-attachments/assets/51281257-7776-4a9e-a031-4f7a2e0d4e7a" />
 
@@ -13,19 +13,20 @@
 - **Unavailable Lux Thresholds:** Optionally mark the sensor unavailable when lux falls below or rises above configured thresholds.
 - **Compatibility:** Works with any camera integrated into Home Assistant, supporting both camera entities and direct image URLs.
 
-## Configuration
+## Configuration Options via UI
 
 - **`entity_id`**: The camera entity from which to fetch images.
 - **`image_url`** _(optional)_: Direct HTTP URL pointing to an image file (e.g., JPEG, PNG).
+- **`calibration_factor`** _(optional)_: A float value to calibrate the perceived luminance to lux. Defaults to 2000 if not specified.
 - **`update_interval`** _(optional)_: Seconds between updates. Default is 30 seconds.
 - **`unavailable_below`** _(optional)_: If the calculated lux is below this value, the sensor is marked unavailable until it rises.
 - **`unavailable_above`** _(optional)_: If the calculated lux is above this value, the sensor is marked unavailable until it falls.
-- **`brightness_roi`** _(optional)_: Defines a rectangular region within the image for focused brightness assessment.
+- **`roi_enabled`** _(optional)_: Defines a rectangular region within the image for focused brightness assessment.
   - **`x`**: The x-coordinate of the top-left corner of the ROI.
   - **`y`**: The y-coordinate of the top-left corner of the ROI.
   - **`width`**: The width of the ROI.
   - **`height`**: The height of the ROI.
-- **`calibration_factor`** _(optional)_: A float value to calibrate the perceived luminance to lux. Defaults to 2000 if not specified.
+
 
 **Note:** Each sensor must have either `entity_id` or `image_url` configured, but not both.
 
