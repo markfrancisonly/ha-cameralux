@@ -1,0 +1,39 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Build / packaging artifacts
+build/
+dist/
+*.egg-info/
+# produced by .github/workflows/release.yml
+custom_components/cameralux/cameralux.zip
+
+# Environments
+.venv/
+venv/
+env/
+
+# Coverage / test output
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Editor / OS cruft
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Release notes are uploaded manually to the GitHub release, not committed
+RELEASE_NOTES*.md
+CHANGELOG.md
+# Local fleet analysis, not repo content
+CAMERA_TUNING_REPORT.md

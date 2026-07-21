@@ -4,16 +4,21 @@
     "step": {
       "user": {
         "title": "Add Camera Lux Sensor",
-        "description": "Select a source (camera or image URL)",
+        "description": "Create a lux sensor from a camera entity or image URL. The defaults give good results out of the box: pick the Algorithm by camera type (see the documentation) and adjust Full-scale lux if readings run high or low. A camera in IR mode measures its own infrared illuminator, not ambient light — enable IR detection and choose what to do when an IR frame is detected: measure it with a chosen curve, report a fixed value, or go offline.",
         "data": {
           "name": "Name",
           "source": "Source",
           "entity_id": "Camera entity",
           "image_url": "Image URL",
-          "calibration_factor": "Calibration factor",
-          "update_interval": "Update interval (seconds)",
+          "algorithm": "Algorithm (how brightness becomes lux)",
+          "full_scale_lux": "Full-scale lux (calibration: raises or lowers all readings)",
           "unavailable_below": "Unavailable below lux",
           "unavailable_above": "Unavailable above lux",
+          "ir_enabled": "Enable IR detection",
+          "ir_chroma_threshold": "IR chroma threshold (frames below this color level count as IR; per-camera)",
+          "ir_algorithm": "IR algorithm — what to do when an IR frame is detected",
+          "ir_fixed_lux": "IR fixed lux (used by Fixed brightness; default 0)",
+          "update_interval": "Update interval (seconds)",
           "roi_enabled": "Region of Interest (ROI)",
           "x": "ROI x",
           "y": "ROI y",
@@ -23,28 +28,31 @@
       }
     },
     "error": {
-      "need_source": "Pick either a camera or an image URL.",
-      "pick_one_source": "Please provide only one: camera OR image URL.",
-      "required": "This field is required."
+      "required": "This field is required.",
+      "invalid_input": "Invalid value entered."
     },
     "abort": {
-      "need_source": "You must provide either a camera entity or an image URL.",
       "already_configured": "This Camera Lux sensor is already configured."
     }
   },
   "options": {
     "step": {
-      "edit": {
+      "init": {
         "title": "Camera Lux Options",
-        "description": "Update source, ROI, or sampling settings.",
+        "description": "The defaults give good results out of the box: pick the Algorithm by camera type (see the documentation) and adjust Full-scale lux if readings run high or low. A camera in IR mode measures its own infrared illuminator, not ambient light — enable IR detection and choose what to do when an IR frame is detected: measure it with a chosen curve, report a fixed value, or go offline.",
         "data": {
           "source": "Source",
           "entity_id": "Camera entity",
           "image_url": "Image URL",
-          "calibration_factor": "Calibration factor",
-          "update_interval": "Update interval (seconds)",
+          "algorithm": "Algorithm (how brightness becomes lux)",
+          "full_scale_lux": "Full-scale lux (calibration: raises or lowers all readings)",
           "unavailable_below": "Unavailable below lux",
           "unavailable_above": "Unavailable above lux",
+          "ir_enabled": "Enable IR detection",
+          "ir_chroma_threshold": "IR chroma threshold (frames below this color level count as IR; per-camera)",
+          "ir_algorithm": "IR algorithm — what to do when an IR frame is detected",
+          "ir_fixed_lux": "IR fixed lux (used by Fixed brightness; default 0)",
+          "update_interval": "Update interval (seconds)",
           "roi_enabled": "Region of Interest (ROI)",
           "x": "ROI x",
           "y": "ROI y",
@@ -52,6 +60,10 @@
           "height": "ROI height"
         }
       }
+    },
+    "error": {
+      "required": "This field is required.",
+      "invalid_input": "Invalid value entered."
     }
   }
 }

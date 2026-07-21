@@ -1,0 +1,11 @@
+# Test-only dependencies.
+#
+# helpers/const/migration tests need nothing but pytest + Pillow + numpy.
+# config_flow/sensor tests import Home Assistant; they self-skip via
+# pytest.importorskip when it is absent, so this file installs it to make sure
+# they actually run in CI rather than silently skipping.
+pytest>=7
+Pillow>=10
+numpy>=1.24
+homeassistant>=2024.12.0
+PyTurboJPEG==1.8.0

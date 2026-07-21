@@ -1,9 +1,15 @@
 name: Release
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - "*"
   workflow_dispatch:
+
+# Needed to CREATE the release and upload the asset.
+# (default GITHUB_TOKEN is read-only on many repos)
+permissions:
+  contents: write
 
 jobs:
   release:
@@ -13,28 +19,34 @@ jobs:
       - name: ⤵️ Check out code from GitHub
         uses: actions/checkout@v4
 
-      - name: 🔢 Adjust version number
+      - name: 🧩 Derive component name (repo name minus optional "ha-" prefix)
         shell: bash
         run: |
-          version="${{ github.event.release.tag_name }}"
+          repo="${GITHUB_REPOSITORY##*/}"
+          component="${repo#ha-}"
+          echo "COMPONENT_NAME=${component}" >> "$GITHUB_ENV"
+          echo "📦 Using COMPONENT_NAME=${component}"
+
+      - name: 🔢 Adjust version number to the tag
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME}"      # e.g. v2026.7.1
           version="${version,,}"
           version="${version#v}"
-          jq --arg version "$version" '.version=$version' \
-            "${{ github.workspace }}/custom_components/cameralux/manifest.json" \
-            > "${{ github.workspace }}/custom_components/cameralux/manifest.json.tmp"
-          mv "${{ github.workspace }}/custom_components/cameralux/manifest.json.tmp" \
-             "${{ github.workspace }}/custom_components/cameralux/manifest.json"
+          manifest="custom_components/${COMPONENT_NAME}/manifest.json"
+          jq --arg version "$version" '.version = $version' "$manifest" > "$manifest.tmp"
+          mv "$manifest.tmp" "$manifest"
 
-      - name: 📦 Created zipped release package
+      - name: 📦 Create zipped release package
+        shell: bash
         run: |
-          cd "${{ github.workspace }}/custom_components/cameralux"
-          zip cameralux.zip -r ./
+          cd "custom_components/${COMPONENT_NAME}"
+          zip -r "${COMPONENT_NAME}.zip" ./ -x '*.zip'
 
-      - name: ⬆️ Upload zip to release
-        uses: svenstaro/upload-release-action@v2
+      - name: 🚀 Create GitHub release and upload zip
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
         with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: "${{ github.workspace }}/custom_components/cameralux/cameralux.zip"
-          asset_name: cameralux.zip
-          tag: ${{ github.ref }}
-          overwrite: true
+          files: custom_components/${{ env.COMPONENT_NAME }}/${{ env.COMPONENT_NAME }}.zip
+          generate_release_notes: true

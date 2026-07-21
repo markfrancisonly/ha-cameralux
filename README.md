@@ -9,26 +9,109 @@
 - **Real-Time Lux Monitoring:** Continuously estimate ambient light levels using your existing cameras.
 - **Configurable Update Intervals:** Customize how frequently each sensor updates its lux readings.
 - **Region of Interest (ROI):** Focus on specific areas within the camera's field of view for more accurate measurements.
-- **Calibration Factor:** Scale luminance to lux calculations to better align with real-world lighting conditions.
-- **Unavailable Lux Thresholds:** Optionally mark the sensor unavailable when lux falls below or rises above configured thresholds.
+- **Named Algorithms:** Pick how brightness becomes lux by camera type — no power-law tuning required.
+- **Full-Scale Lux:** One calibration knob that raises or lowers all readings.
+- **IR Detection:** A camera in IR mode measures its own illuminator, not ambient light — enable detection (per-camera chroma threshold + per-pixel gray verification) and declare what to report when an IR frame is seen: a measurement with a chosen curve, a fixed lux, or unavailable.
+- **Unavailable Lux Thresholds:** Optionally mark the sensor unavailable when lux falls below or rises above configured thresholds — go offline rather than publish a reading outside the trustworthy envelope.
 - **Compatibility:** Works with any camera integrated into Home Assistant, supporting both camera entities and direct image URLs.
 
 ## Configuration Options via UI
 
 - **`entity_id`**: The camera entity from which to fetch images.
 - **`image_url`** _(optional)_: Direct HTTP URL pointing to an image file (e.g., JPEG, PNG).
-- **`calibration_factor`** _(optional)_: A float value to calibrate the perceived luminance to lux. Defaults to 2000 if not specified.
+- **`full_scale_lux`** _(optional)_: The lux reported for a pure white image. Because the measured luminance is normalized to `[0, 1]`, this is simultaneously the calibration knob and the sensor's maximum reading — published as the `max_lux` attribute. Defaults to 1000.
+- **`algorithm`** _(optional)_: How measured brightness becomes lux — see [Choosing an algorithm](#choosing-an-algorithm). Defaults to Human brightness.
 - **`update_interval`** _(optional)_: Seconds between updates. Default is 30 seconds.
 - **`unavailable_below`** _(optional)_: If the calculated lux is below this value, the sensor is marked unavailable until it rises.
 - **`unavailable_above`** _(optional)_: If the calculated lux is above this value, the sensor is marked unavailable until it falls.
+- **`ir_enabled`** _(optional)_: Enable IR detection. Off by default — leave off for cameras with no IR mode (tablets, wall panels, fixed-exposure).
+- **`ir_chroma_threshold`** _(optional)_: Frames below this color level count as IR. Cameras flip to IR at different chroma levels, so tune per camera (IR/monochrome ≈ 0–4, color scenes 7+; default 6).
+- **`ir_algorithm`** _(optional)_: What to do when an IR frame is detected — see [IR mode](#ir-mode). Defaults to Fixed brightness.
+- **`ir_fixed_lux`** _(optional)_: The lux reported by Fixed brightness. Defaults to 0.
 - **`roi_enabled`** _(optional)_: Defines a rectangular region within the image for focused brightness assessment.
   - **`x`**: The x-coordinate of the top-left corner of the ROI.
   - **`y`**: The y-coordinate of the top-left corner of the ROI.
   - **`width`**: The width of the ROI.
   - **`height`**: The height of the ROI.
 
-
 **Note:** Each sensor must have either `entity_id` or `image_url` configured, but not both.
+
+## IR mode
+
+When a camera switches to infrared mode, it stops measuring ambient light:
+the image shows the camera's **own IR illuminator** reflecting off the scene,
+shaped by surface distances and auto-gain. Enable IR detection and the IR
+algorithm is the policy applied **after** a frame is detected as IR:
+
+- **Fixed brightness** _(default)_ — report `ir_fixed_lux` (default 0). A
+  declared policy value, not a measurement, so the unavailable thresholds
+  don't judge it.
+- **Human brightness / Human brightness, highlight-resistant / Linear** —
+  measure the IR frame with that curve (sharing the one `full_scale_lux`),
+  with the normal unavailable thresholds in force. For cameras whose IR
+  image is still meaningful.
+- **Unavailable** — take the sensor offline rather than report a number
+  nobody measured.
+
+A frame counts as IR only when its chroma falls below the per-camera
+threshold **and** nearly every pixel is individually gray (a true monochrome
+frame) — dark or muted color scenes do not trip it. The live `chroma`
+attribute shows what the detector sees; `ir_detected` shows the verdict each
+cycle.
+
+## Choosing an algorithm
+
+Pick by camera type — you don't need to understand the math:
+
+- **Human brightness** _(default)_ — for regular cameras **with infrared night
+  mode** (most security cameras). Readings track how bright the scene *looks*.
+  Pair it with IR detection and the default Fixed policy: monochrome IR
+  frames report the fixed value, so this algorithm only ever handles daylight
+  and lit scenes, where it performs best.
+- **Human brightness, highlight-resistant** — same response, but the brightest
+  ~5% of pixels are ignored. Choose this when direct sun patches, windows, or a
+  lamp in frame make readings jump while the room's overall light hasn't
+  changed.
+- **Linear** — for **fixed-exposure or no-IR cameras**: tablets, wall panels,
+  and starlight/"color night vision" cameras that never switch to monochrome.
+  These cameras see true darkness on the normal path, and linear is the only
+  response that keeps dark readings honest (a dark room reads a few lux;
+  compressive curves would report 40–140 lx). Leave IR detection off.
+
+**Algorithms set the shape; full-scale sets the size.** No algorithm ever
+changes your scale knob: `full_scale_lux` raises or lowers all measured
+readings. Calibrate against a reference light level
+(`new = current × target_lux / reported_lux`).
+
+## Upgrading from 1.x
+
+Existing 1.x entries retain their previous response curve automatically, so an
+upgrade does not force an immediate recalibration. That compatibility curve is
+not offered for new configuration. Open the entry's Options, choose one of the
+current algorithms, and save when you are ready to move to the current model.
+
+## State Attributes
+
+Listed in the order they appear on the entity:
+
+- **`chroma`**: Mean chroma deviation from neutral, used for IR detection.
+- **`ir_detected`**: **Key attribute.** Present when IR detection is enabled; `true` when the frame reads as IR/monochrome, so the IR policy is in force.
+- **`avg_luminance`**: Mean linear-light luminance of the sampled region, in `[0, 1]`.
+- **`perceived_luminance`**: The perception transform of `avg_luminance`. Multiplied by `full_scale_lux` this gives the state. `null` while a fixed IR value or unavailable policy is in force.
+- **`algorithm`**: The policy in force this cycle — the color curve (`human_brightness`, `human_brightness_hr`, `linear`) or, on an IR frame, the IR selection (a curve name, `fixed`, `unavailable`). Migrated 1.x entries report their compatibility curve until a current algorithm is selected in Options.
+- **`perception_exponent`**: The exponent that policy applies (absent under the legacy log curve).
+- **`max_lux`**: The reading a pure white image would produce.
+- **`unavailable_above_lux`** / **`unavailable_below_lux`**: The configured thresholds. Shown only when set; never applied to a fixed IR value.
+
+## Troubleshooting
+
+When a sensor goes unavailable, enable debug logging to see why — each availability transition is logged with the lux value and the threshold it crossed:
+
+```yaml
+logger:
+  logs:
+    custom_components.cameralux: debug
+```
 
 ## Installation
 
