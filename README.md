@@ -1,6 +1,12 @@
+[![GitHub Release](https://img.shields.io/github/release/markfrancisonly/ha-cameralux.svg?style=flat-square)](https://github.com/markfrancisonly/ha-cameralux/releases)
+[![License](https://img.shields.io/github/license/markfrancisonly/ha-cameralux.svg?style=flat-square)](https://github.com/markfrancisonly/ha-cameralux/blob/master/LICENSE)
+[![hacs](https://img.shields.io/badge/HACS-default-orange.svg?style=flat-square)](https://hacs.xyz)
+
 # Camera Lux
 
 **Camera Lux** is a custom Home Assistant integration that utilizes a camera feed or direct image URL to estimate ambient light levels (lux) in your environment. By analyzing images from your cameras, `cameralux` provides virtual lux readings that can be used to automate lighting, monitor lighting conditions, and enhance your smart home setup.
+
+
 
 <img width="600"  alt="image" src="https://github.com/user-attachments/assets/5832f3c8-ce1b-46d8-b71a-c6e8137ada0b" />
 
@@ -85,13 +91,6 @@ changes your scale knob: `full_scale_lux` raises or lowers all measured
 readings. Calibrate against a reference light level
 (`new = current × target_lux / reported_lux`).
 
-## Upgrading from 1.x
-
-Existing 1.x entries retain their previous response curve automatically, so an
-upgrade does not force an immediate recalibration. That compatibility curve is
-not offered for new configuration. Open the entry's Options, choose one of the
-current algorithms, and save when you are ready to move to the current model.
-
 ## State Attributes
 
 Listed in the order they appear on the entity:
@@ -106,26 +105,40 @@ Listed in the order they appear on the entity:
 - **`max_lux`**: The reading a pure white image would produce.
 - **`unavailable_above_lux`** / **`unavailable_below_lux`**: The configured thresholds. Shown only when set; never applied to a fixed IR value.
 
-## Troubleshooting
+## Breaking Changes: Upgrading from 1.x
 
-When a sensor goes unavailable, enable debug logging to see why — each availability transition is logged with the lux value and the threshold it crossed:
+Existing 1.x entries retain their previous response curve automatically, so an
+upgrade does not force an immediate recalibration. However, the legacy compatibility 
+curve is *not* offered for new configuration or reinstallation. Open the entry's Options, 
+choose one of the current algorithms, and save when you are ready to move to the current model.
 
-```yaml
-logger:
-  logs:
-    custom_components.cameralux: debug
-```
 
 ## Installation
 
-1. **Using HACS (Recommended):**
+### HACS (Recommended)
 
-   - Open Home Assistant.
-   - Navigate to **HACS > Integrations**.
-   - Click on the **"+"** button.
-   - Search for **"Camera Lux Sensor"** and install it.
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=markfrancisonly&repository=ha-cameralux&category=integration)
 
-2. **Manual Installation:**
-   - Download the `cameralux` repository from [GitHub](https://github.com/markfrancisonly/ha-cameralux).
-   - Place the `cameralux` folder inside your `custom_components` directory.
-   - Restart Home Assistant.
+Or manually add the custom repository:
+
+<details>
+<summary>Step-by-step HACS installation</summary>
+
+1. Open **HACS** in your Home Assistant dashboard
+2. Click the **⋮** menu (top right) → **Custom repositories**
+3. Add this URL and set the category to **Integration**, then click **Add**:
+   ```
+   https://github.com/markfrancisonly/ha-cameralux
+   ```
+4. The repository now appears in the custom repositories list. Close the dialog.
+5. Back in HACS, search for **Video Call** and open the result
+6. Click **Download** (or **Install**) and confirm
+7. **Restart Home Assistant**
+
+</details>
+
+### Manual Installation
+
+1. Download the [latest release](https://github.com/markfrancisonly/ha-cameralux/releases)
+2. Copy the contents into `custom_components/ha-cameralux/` inside your HA config directory
+3. Restart Home Assistant
