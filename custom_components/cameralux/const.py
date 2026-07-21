@@ -50,6 +50,15 @@ CONF_UNAVAILABLE_ABOVE = "unavailable_above"
 #                         nobody measured (the honesty valve)
 CONF_IR_ENABLED = "ir_enabled"
 DEFAULT_IR_ENABLED = False
+# Frozen-feed detection (per-sensor gate, default off): fetch each frame
+# twice a moment apart and compare bytes. A live camera never repeats
+# exactly (sensor noise); a stuck/substituted frame (an NVR's "camera
+# offline" placeholder) always does -> unavailable rather than measured.
+# MUST stay off for sources that legitimately serve unchanged bytes between
+# updates (infrequently refreshed snapshot URLs) - identical pairs are
+# normal there, not an outage.
+CONF_FROZEN_DETECTION = "frozen_detection"
+DEFAULT_FROZEN_DETECTION = False
 CONF_IR_ALGORITHM = "ir_algorithm"
 IR_ALGORITHM_FIXED = "fixed"
 IR_ALGORITHM_UNAVAILABLE = "unavailable"

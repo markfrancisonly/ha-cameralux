@@ -14,6 +14,7 @@
 - **Full-Scale Lux:** One calibration knob that raises or lowers all readings.
 - **IR Detection:** A camera in IR mode measures its own illuminator, not ambient light — enable detection (per-camera chroma threshold + per-pixel gray verification) and declare what to report when an IR frame is seen: a measurement with a chosen curve, a fixed lux, or unavailable.
 - **Unavailable Lux Thresholds:** Optionally mark the sensor unavailable when lux falls below or rises above configured thresholds — go offline rather than publish a reading outside the trustworthy envelope.
+- **Frozen-Feed Detection (opt-in):** When enabled, each cycle fetches the frame twice, a moment apart, and compares bytes. A live camera never produces identical bytes twice (sensor noise); only a stuck or substituted frame — an NVR's "camera offline" placeholder, a wedged stream — repeats exactly. Such frames are never measured: the sensor goes unavailable until real frames return, so downstream automations hold instead of reacting to a picture nobody took. Leave it off for sources that legitimately serve unchanged bytes between updates (infrequently refreshed snapshot URLs), where identical pairs are normal.
 - **Compatibility:** Works with any camera integrated into Home Assistant, supporting both camera entities and direct image URLs.
 
 ## Configuration Options via UI
@@ -98,6 +99,7 @@ Listed in the order they appear on the entity:
 - **`chroma`**: Mean chroma deviation from neutral, used for IR detection.
 - **`ir_detected`**: **Key attribute.** Present when IR detection is enabled; `true` when the frame reads as IR/monochrome, so the IR policy is in force.
 - **`avg_luminance`**: Mean linear-light luminance of the sampled region, in `[0, 1]`.
+- **`effective_roi`**: Present when ROI is enabled after the first successful frame. The actual source-image rectangle measured after defaults and boundary clamping; reports the full frame if an invalid ROI falls back to it.
 - **`perceived_luminance`**: The perception transform of `avg_luminance`. Multiplied by `full_scale_lux` this gives the state. `null` while a fixed IR value or unavailable policy is in force.
 - **`algorithm`**: The policy in force this cycle — the color curve (`human_brightness`, `human_brightness_hr`, `linear`) or, on an IR frame, the IR selection (a curve name, `fixed`, `unavailable`). Migrated 1.x entries report their compatibility curve until a current algorithm is selected in Options.
 - **`perception_exponent`**: The exponent that policy applies (absent under the legacy log curve).

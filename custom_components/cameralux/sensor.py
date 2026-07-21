@@ -40,6 +40,7 @@ from .const import (
     CONF_IMAGE_URL,
     CONF_IR_ALGORITHM,
     CONF_IR_CHROMA_THRESHOLD,
+    CONF_FROZEN_DETECTION,
     CONF_IR_ENABLED,
     CONF_IR_FIXED_LUX,
     CONF_ROI_ENABLED,
@@ -71,6 +72,12 @@ from .helpers import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# Frozen-feed detection: gap between the two same-cycle fetches whose bytes
+# are compared. Long enough that a live stream has certainly advanced a frame
+# and any per-request encode has re-run; short enough to be imperceptible in
+# the update cadence.
+FROZEN_VERIFY_DELAY_SECONDS = 1.0
 
 
 def _redact_url(url: str | None) -> str | None:
@@ -161,6 +168,7 @@ class CameraLuxSensor(SensorEntity):
         self.avg_luminance: float | None = None
         self.perceived_luminance: float | None = None
         self.chroma: float | None = None
+        self.effective_roi: dict[str, int] | None = None
         self.ir_active: bool = False  # IR profile enabled AND chroma below threshold
         self.is_updating = False
 
@@ -204,6 +212,7 @@ class CameraLuxSensor(SensorEntity):
         # detected — measure with a named curve, report a fixed value, or go
         # unavailable.
         self.ir_enabled = bool(config.get(CONF_IR_ENABLED, False))
+        self.frozen_detection = bool(config.get(CONF_FROZEN_DETECTION, False))
         (
             self.ir_algorithm,
             self.ir_trim_fraction,
@@ -334,6 +343,8 @@ class CameraLuxSensor(SensorEntity):
         attrs["avg_luminance"] = (
             round(self.avg_luminance, 4) if self.avg_luminance is not None else None
         )
+        if self.roi_enabled and self.effective_roi is not None:
+            attrs["effective_roi"] = dict(self.effective_roi)
         attrs["perceived_luminance"] = (
             round(self.perceived_luminance, 4)
             if self.perceived_luminance is not None
@@ -417,6 +428,14 @@ class CameraLuxSensor(SensorEntity):
                 self.lux = None
                 return
 
+            if self.frozen_detection:
+                image_bytes = await self._async_verify_live_frame(
+                    image_bytes, was_available
+                )
+                if image_bytes is None:
+                    self.lux = None
+                    return
+
             roi = self.roi if self.roi_enabled else None
             # Detection runs only when enabled (threshold None disables it);
             # the IR algorithm is the policy applied AFTER an IR frame is
@@ -432,6 +451,7 @@ class CameraLuxSensor(SensorEntity):
                 self.avg_luminance,
                 self.chroma,
                 self.ir_active,
+                self.effective_roi,
             ) = await self.hass.async_add_executor_job(
                 process_image,
                 image_bytes,
@@ -518,6 +538,41 @@ class CameraLuxSensor(SensorEntity):
         finally:
             self.is_updating = False
             self.async_write_ha_state()
+
+    async def _async_verify_live_frame(
+        self, image_bytes: bytes, was_available: bool
+    ) -> bytes | None:
+        """Frozen-feed detection (per-sensor opt-in): prove the frame live.
+
+        Fetch the frame AGAIN a moment later and compare bytes. A live camera
+        never produces identical bytes twice (sensor noise); only a stuck or
+        substituted frame (e.g. an NVR's "camera offline" placeholder)
+        repeats exactly. The pair check runs every cycle, so the placeholder
+        is auto-discovered on the FIRST outage and never measured — honesty
+        valve, go offline rather than report a picture nobody is taking.
+
+        Returns the FRESH second frame to measure (no added latency for live
+        feeds), or None when the feed is frozen/unverifiable. Keep the option
+        OFF for sources that legitimately serve unchanged bytes between
+        updates (infrequently refreshed snapshot URLs).
+        """
+        await asyncio.sleep(FROZEN_VERIFY_DELAY_SECONDS)
+        if self.camera_entity_id:
+            verify_bytes = await self.async_get_camera_snapshot(self.camera_entity_id)
+        else:
+            verify_bytes = await self.async_fetch_image_from_url(self.image_url)
+
+        if not verify_bytes or verify_bytes == image_bytes:
+            if was_available:
+                _LOGGER.debug(
+                    "'%s' became unavailable: %s",
+                    self._attr_name,
+                    "frozen feed (verify frame byte-identical)"
+                    if verify_bytes
+                    else "no image on verify fetch",
+                )
+            return None
+        return verify_bytes
 
     async def async_get_camera_snapshot(self, entity_id: str) -> bytes | None:
         """Fetch a snapshot from a camera entity via HA core (timeout included).

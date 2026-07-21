@@ -25,12 +25,14 @@ from custom_components.cameralux.const import (  # noqa: E402
     ALGORITHM_HUMAN_HR,
     ALGORITHM_LINEAR,
     CONF_ALGORITHM,
+    CONF_BRIGHTNESS_ROI,
     CONF_ENTITY_ID,
     CONF_FULL_SCALE_LUX,
     CONF_IR_ALGORITHM,
     CONF_IR_CHROMA_THRESHOLD,
     CONF_IR_ENABLED,
     CONF_IR_FIXED_LUX,
+    CONF_ROI_ENABLED,
     CONF_SOURCE,
     CONF_UNAVAILABLE_ABOVE,
     CONF_UNAVAILABLE_BELOW,
@@ -263,6 +265,22 @@ def test_attributes_order_names_and_ir_detected():
     assert sensor.extra_state_attributes["algorithm"] == ALGORITHM_HUMAN
 
 
+def test_effective_roi_attribute_is_runtime_diagnostic_only():
+    sensor = make_sensor(**{CONF_BRIGHTNESS_ROI: {CONF_ROI_ENABLED: True, "width": 50}})
+    assert "effective_roi" not in sensor.extra_state_attributes
+    sensor.effective_roi = {"x": 0, "y": 0, "width": 50, "height": 100}
+    assert sensor.extra_state_attributes["effective_roi"] == {
+        "x": 0,
+        "y": 0,
+        "width": 50,
+        "height": 100,
+    }
+
+    disabled = make_sensor()
+    disabled.effective_roi = sensor.effective_roi
+    assert "effective_roi" not in disabled.extra_state_attributes
+
+
 def test_ir_detected_is_a_key_attribute_gated_by_the_checkbox():
     """Present (true/false) whenever detection runs; absent when detection is
     off — claiming IR/not-IR without looking would be a lie."""
@@ -352,3 +370,94 @@ def test_async_setup_entry_options_override_data():
     asyncio.run(async_setup_entry(None, entry, add_entities))
     (entities,) = add_entities.call_args[0]
     assert entities[0].max_lux == 500.0
+
+
+# --- frozen-feed detection (same-cycle pair fetch) ------------------------
+
+
+def _jpeg(color):
+    import io
+
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8), color).save(buf, format="JPEG")
+    return buf.getvalue()
+
+
+def _rig(monkeypatch, sensor, frames):
+    """Wire a scripted snapshot sequence and neutralize the verify delay."""
+    from types import SimpleNamespace
+
+    from homeassistant.core import CoreState
+
+    from custom_components.cameralux import sensor as sensor_mod
+
+    async def fake_snapshot(_entity_id):
+        return frames.pop(0)
+
+    async def fake_executor(fn, *args):
+        return fn(*args)
+
+    sensor.hass = SimpleNamespace(
+        state=CoreState.running, async_add_executor_job=fake_executor
+    )
+    monkeypatch.setattr(sensor, "async_get_camera_snapshot", fake_snapshot)
+    monkeypatch.setattr(sensor, "async_write_ha_state", lambda: None)
+    monkeypatch.setattr(sensor_mod, "FROZEN_VERIFY_DELAY_SECONDS", 0)
+
+
+def test_live_pair_publishes_immediately(monkeypatch):
+    """Two differing fetches in one cycle = live feed: the fresh frame is
+    measured with no cross-cycle delay."""
+    sensor = make_sensor(frozen_detection=True)
+    frames = [_jpeg((10, 10, 10)), _jpeg((200, 200, 200))]
+    _rig(monkeypatch, sensor, frames)
+
+    asyncio.run(sensor.async_update())
+    assert sensor.lux is not None  # published in the SAME cycle
+
+
+def test_frozen_pair_never_measured(monkeypatch):
+    """Byte-identical pair = stuck/substituted frame: offline, nothing
+    published — including on the very first outage."""
+    sensor = make_sensor(frozen_detection=True)
+    dummy = _jpeg((50, 50, 50))
+    frames = [dummy, dummy]
+    _rig(monkeypatch, sensor, frames)
+
+    asyncio.run(sensor.async_update())
+    assert sensor.lux is None
+
+    # recovery: a live pair next cycle publishes right away
+    frames[:] = [_jpeg((10, 10, 10)), _jpeg((201, 201, 201))]
+    asyncio.run(sensor.async_update())
+    assert sensor.lux is not None
+
+
+def test_missing_verify_fetch_stays_offline(monkeypatch):
+    """If the second fetch fails the frame is unverified: offline."""
+    sensor = make_sensor(frozen_detection=True)
+    frames = [_jpeg((10, 10, 10)), None]
+    _rig(monkeypatch, sensor, frames)
+
+    asyncio.run(sensor.async_update())
+    assert sensor.lux is None
+
+
+def test_detection_off_measures_single_fetch(monkeypatch):
+    """Default (checkbox off): one fetch per cycle, identical bytes across
+    cycles are measured normally — infrequently updated image sources must
+    not flap unavailable."""
+    sensor = make_sensor()  # frozen_detection defaults off
+    static = _jpeg((80, 80, 80))
+    frames = [static]
+    _rig(monkeypatch, sensor, frames)
+
+    asyncio.run(sensor.async_update())
+    assert sensor.lux is not None  # measured immediately, no second pull
+    assert frames == []  # exactly ONE fetch consumed
+
+    frames[:] = [static]  # same bytes next cycle: still fine
+    asyncio.run(sensor.async_update())
+    assert sensor.lux is not None

@@ -149,12 +149,13 @@ def test_resize_only_shrinks_and_preserves_aspect():
 
 
 def test_process_image_pure_white_is_full_scale_for_any_exponent():
-    avg, chroma, ir_frame = process_image(
+    avg, chroma, ir_frame, effective_roi = process_image(
         _png(Image.new("RGB", (20, 20), "white")), None, 250_000
     )
     assert avg == pytest.approx(1.0, rel=1e-3)
     assert chroma == pytest.approx(0.0, abs=1e-6)
     assert ir_frame is False  # no threshold given -> color path
+    assert effective_roi is None
     # max_lux invariant: 1.0 ** exponent == 1.0
     for exponent in (0.1, 0.5, 2.0, 4.0):
         assert avg**exponent == pytest.approx(1.0, rel=1e-3)
@@ -163,21 +164,31 @@ def test_process_image_pure_white_is_full_scale_for_any_exponent():
 def test_process_image_roi_scopes_luminance_but_chroma_uses_full_frame():
     frame = Image.new("RGB", (40, 20), (255, 0, 0))  # right half red
     frame.paste(Image.new("RGB", (20, 20), (255, 255, 255)), (0, 0))  # left half white
-    avg, chroma, _ = process_image(
-        _png(frame), {"x": 0, "y": 0, "width": 20, "height": 20}, 250_000
+    avg, chroma, _, effective_roi = process_image(
+        _png(frame), {"x": 10, "y": 0, "width": 20, "height": 40}, 250_000
     )
-    assert avg == pytest.approx(1.0, rel=1e-3)  # ROI saw only the white half
+    assert 0.0 < avg < 1.0  # ROI spans both the white and red halves
     assert chroma > 10.0  # chroma still saw the red half
+    assert effective_roi == {"x": 10, "y": 0, "width": 20, "height": 20}
+
+
+def test_process_image_reports_full_frame_when_roi_origin_is_invalid():
+    _, _, _, effective_roi = process_image(
+        _png(Image.new("RGB", (40, 20), "white")),
+        {"x": 100, "y": 0, "width": 10, "height": 10},
+        250_000,
+    )
+    assert effective_roi == {"x": 0, "y": 0, "width": 40, "height": 20}
 
 
 def test_process_image_dispatches_ir_method_below_threshold():
     grey = _png(Image.new("RGB", (20, 20), (90, 90, 90)))  # chroma ~0, all gray
-    _, _, ir = process_image(grey, None, 250_000, ir_chroma_threshold=6.0)
+    _, _, ir, _ = process_image(grey, None, 250_000, ir_chroma_threshold=6.0)
     assert ir is True  # chroma below threshold -> IR method
-    _, _, ir = process_image(grey, None, 250_000, ir_chroma_threshold=None)
+    _, _, ir, _ = process_image(grey, None, 250_000, ir_chroma_threshold=None)
     assert ir is False  # profile disabled -> color method
     colour = _png(Image.new("RGB", (20, 20), (200, 90, 40)))
-    _, _, ir = process_image(colour, None, 250_000, ir_chroma_threshold=6.0)
+    _, _, ir, _ = process_image(colour, None, 250_000, ir_chroma_threshold=6.0)
     assert ir is False  # colour frame stays on the color method
 
 
@@ -194,7 +205,7 @@ def test_gray_guard_rejects_dark_noisy_colour_frames():
     frame = _noisy_dark_colour_frame()
     assert compute_chroma(frame) < 6.0  # mean chroma alone would say IR
     assert compute_gray_fraction(frame) < 0.85  # but pixels are not gray
-    _, _, ir = process_image(_png(frame), None, 250_000, ir_chroma_threshold=6.0)
+    _, _, ir, _ = process_image(_png(frame), None, 250_000, ir_chroma_threshold=6.0)
     assert ir is False  # guard keeps the color method
 
 

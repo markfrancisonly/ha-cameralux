@@ -22,6 +22,7 @@ from .const import (
     CONF_IMAGE_URL,
     CONF_IR_ALGORITHM,
     CONF_IR_CHROMA_THRESHOLD,
+    CONF_FROZEN_DETECTION,
     CONF_IR_ENABLED,
     CONF_IR_FIXED_LUX,
     CONF_ROI_ENABLED,
@@ -35,6 +36,7 @@ from .const import (
     CONFIG_ENTRY_VERSION,
     DEFAULT_ALGORITHM,
     DEFAULT_FULL_SCALE_LUX,
+    DEFAULT_FROZEN_DETECTION,
     DEFAULT_IR_ALGORITHM,
     DEFAULT_IR_CHROMA_THRESHOLD,
     DEFAULT_IR_ENABLED,
@@ -151,14 +153,19 @@ STEP_SCHEMA = vol.Schema(
             }
         ),
         vol.Required(CONF_IR_FIXED_LUX, default=DEFAULT_IR_FIXED_LUX): _NUM,
-        vol.Required(
-            CONF_UPDATE_INTERVAL, default=DEFAULT_UPDATE_INTERVAL
-        ): selector.selector({"number": {"min": 5, "step": 1, "mode": "box"}}),
         vol.Required(UI_ROI_ENABLED, default=False): selector.selector({"boolean": {}}),
         vol.Optional(CONF_X): _NUM,
         vol.Optional(CONF_Y): _NUM,
         vol.Optional(CONF_WIDTH): _NUM,
         vol.Optional(CONF_HEIGHT): _NUM,
+        # Frozen-feed detection: double-pull + byte compare. Off by default:
+        # identical pairs are NORMAL for infrequently updated image sources.
+        vol.Required(
+            CONF_FROZEN_DETECTION, default=DEFAULT_FROZEN_DETECTION
+        ): selector.selector({"boolean": {}}),
+        vol.Required(
+            CONF_UPDATE_INTERVAL, default=DEFAULT_UPDATE_INTERVAL
+        ): selector.selector({"number": {"min": 5, "step": 1, "mode": "box"}}),
     }
 )
 
@@ -269,6 +276,9 @@ def _parse_step(user_input: dict) -> tuple[dict, dict[str, str]]:
     )
 
     ir_enabled = bool(user_input.get(CONF_IR_ENABLED, DEFAULT_IR_ENABLED))
+    frozen_detection = bool(
+        user_input.get(CONF_FROZEN_DETECTION, DEFAULT_FROZEN_DETECTION)
+    )
     # Cameras flip to IR at different chroma levels; per-camera threshold.
     ir_chroma_threshold = _required_float(
         user_input,
@@ -308,6 +318,7 @@ def _parse_step(user_input: dict) -> tuple[dict, dict[str, str]]:
         CONF_UNAVAILABLE_BELOW: unavailable_below,
         CONF_UNAVAILABLE_ABOVE: unavailable_above,
         CONF_IR_ENABLED: ir_enabled,
+        CONF_FROZEN_DETECTION: frozen_detection,
         CONF_IR_CHROMA_THRESHOLD: ir_chroma_threshold,
         CONF_IR_ALGORITHM: ir_algorithm,
         CONF_IR_FIXED_LUX: ir_fixed_lux,

@@ -120,12 +120,20 @@ def precompute_inverse_gamma_8bit_lut() -> np.ndarray:
 INVERSE_GAMMA_LUT = precompute_inverse_gamma_8bit_lut()
 
 
-def crop_image(image: Image.Image, roi_config: Optional[Dict[str, int]]) -> Image.Image:
-    """Crop the image to the provided ROI; treat 0 width/height as full dimension."""
+def _crop_image_with_effective_roi(
+    image: Image.Image, roi_config: Optional[Dict[str, int]]
+) -> tuple[Image.Image, dict[str, int] | None]:
+    """Crop to the ROI and return the source-frame rectangle actually used."""
     if not roi_config:
-        return image
+        return image, None
 
     img_width, img_height = image.size
+    full_frame = {
+        CONF_X: 0,
+        CONF_Y: 0,
+        CONF_WIDTH: img_width,
+        CONF_HEIGHT: img_height,
+    }
     x = roi_config.get(CONF_X, 0) or 0
     y = roi_config.get(CONF_Y, 0) or 0
     w = roi_config.get(CONF_WIDTH, 0) or img_width
@@ -135,7 +143,7 @@ def crop_image(image: Image.Image, roi_config: Optional[Dict[str, int]]) -> Imag
         _LOGGER.warning(
             "ROI origin outside the frame, using full image: %s", roi_config
         )
-        return image
+        return image, full_frame
 
     x = max(0, x)
     y = max(0, y)
@@ -144,10 +152,16 @@ def crop_image(image: Image.Image, roi_config: Optional[Dict[str, int]]) -> Imag
 
     if w <= 0 or h <= 0:
         _LOGGER.warning("Invalid ROI after clamping: %s", roi_config)
-        return image
+        return image, full_frame
 
     _LOGGER.debug("ROI: x=%d, y=%d, width=%d, height=%d", x, y, w, h)
-    return image.crop((x, y, x + w, y + h))
+    effective_roi = {CONF_X: x, CONF_Y: y, CONF_WIDTH: w, CONF_HEIGHT: h}
+    return image.crop((x, y, x + w, y + h)), effective_roi
+
+
+def crop_image(image: Image.Image, roi_config: Optional[Dict[str, int]]) -> Image.Image:
+    """Crop the image to the provided ROI; treat 0 width/height as full dimension."""
+    return _crop_image_with_effective_roi(image, roi_config)[0]
 
 
 def resize_image(image: Image.Image, max_pixels: int) -> Image.Image:
@@ -334,12 +348,15 @@ def process_image(
     ir_chroma_threshold: Optional[float] = None,
     color_trim_fraction: float = 0.0,
     ir_statistic: str = "trim",
-) -> Tuple[float, float, bool]:
+) -> Tuple[float, float, bool, dict[str, int] | None]:
     """Decode and measure a snapshot in one call (run me in an executor).
 
-    Returns (avg_luminance, chroma, ir_frame). Chroma is measured on the FULL
-    frame (an ROI can be legitimately colorless without the camera being in IR
-    mode); luminance honors the ROI. When ir_chroma_threshold is given, a frame
+    Returns (avg_luminance, chroma, ir_frame, effective_roi). Chroma is
+    measured on the FULL frame (an ROI can be legitimately colorless without
+    the camera being in IR mode); luminance honors the ROI. effective_roi is
+    the actual source-frame rectangle after defaults and clamping, the full
+    frame after fallback, or None when ROI is disabled. When
+    ir_chroma_threshold is given, a frame
     counts as IR only if its chroma falls below the threshold AND nearly all
     pixels are individually gray (IR_GRAY_FRACTION_MIN) — low mean chroma alone
     also matches dark/muted COLOR frames. IR frames use the IR luminance
@@ -360,9 +377,21 @@ def process_image(
     )
 
     if roi:
-        lum_source = resize_image(crop_image(image, roi), max_pixels)
+        cropped, effective_roi = _crop_image_with_effective_roi(image, roi)
+        lum_source = resize_image(cropped, max_pixels)
     else:
         lum_source = full_small
+        effective_roi = None
     if ir_frame:
-        return calculate_ir_image_luminance(lum_source, ir_statistic), chroma, True
-    return calculate_image_luminance(lum_source, color_trim_fraction), chroma, False
+        return (
+            calculate_ir_image_luminance(lum_source, ir_statistic),
+            chroma,
+            True,
+            effective_roi,
+        )
+    return (
+        calculate_image_luminance(lum_source, color_trim_fraction),
+        chroma,
+        False,
+        effective_roi,
+    )
