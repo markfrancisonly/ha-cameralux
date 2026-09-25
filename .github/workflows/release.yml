@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: ⤵️ Check out code from GitHub
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 🧩 Derive component name (repo name minus optional "ha-" prefix)
         shell: bash
@@ -46,7 +46,7 @@ jobs:
 
       - name: 🚀 Create GitHub release and upload zip
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: custom_components/${{ env.COMPONENT_NAME }}/${{ env.COMPONENT_NAME }}.zip
           generate_release_notes: true
