@@ -15,8 +15,7 @@
     "custom_components.cameralux"
   ],
   "requirements": [
-    "numpy>=1.18.0",
-    "Pillow>=10.0.0"
+    "numpy>=1.18.0"
   ],
   "version": "2.1.0"
 }
