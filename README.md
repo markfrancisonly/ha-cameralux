@@ -131,7 +131,7 @@ Or manually add the custom repository:
    https://github.com/markfrancisonly/ha-cameralux
    ```
 4. The repository now appears in the custom repositories list. Close the dialog.
-5. Back in HACS, search for **Video Call** and open the result
+5. Back in HACS, search for **Camera Lux** and open the result
 6. Click **Download** (or **Install**) and confirm
 7. **Restart Home Assistant**
 
@@ -139,6 +139,6 @@ Or manually add the custom repository:
 
 ### Manual Installation
 
-1. Download the [latest release](https://github.com/markfrancisonly/ha-cameralux/releases)
-2. Copy the contents into `custom_components/ha-cameralux/` inside your HA config directory
+1. Download `cameralux.zip` from the [latest release](https://github.com/markfrancisonly/ha-cameralux/releases)
+2. Extract it into `custom_components/cameralux/` inside your HA config directory
 3. Restart Home Assistant
